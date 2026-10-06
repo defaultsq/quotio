@@ -12,6 +12,8 @@ impl ProviderAdapter for MockProvider {
         Box::pin(async move {
             let fetched_at = context.clock.now();
             Ok(ProviderUsage {
+                fresh_observation: false,
+                history_identity: None,
                 reset_credits: None,
                 antigravity_subscription: None,
                 codex_profile: None,
