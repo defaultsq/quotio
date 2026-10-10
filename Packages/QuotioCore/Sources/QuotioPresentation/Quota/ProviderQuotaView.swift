@@ -238,15 +238,6 @@ private struct AccountQuotaCardV2: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            Button {
-                historyModel = history.makeScreen(accountID: account.key, provider: provider)
-            } label: {
-                Label("history.title".localized(), systemImage: "chart.bar.xaxis")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .focused($historyButtonFocused)
-            .help("history.title".localized())
         }
         .padding(16)
         .background(
@@ -259,7 +250,7 @@ private struct AccountQuotaCardV2: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
         )
         .sheet(item: $historyModel, onDismiss: { historyButtonFocused = true }) { model in
-            QuotaHistorySheet(model: model, accountName: account.email, providerName: provider.displayName,
+            QuotaHistorySheet(model: model, accountName: account.email, provider: provider,
                               displayMode: settings.quotaDisplayMode, hideSensitiveInfo: settings.hideSensitiveInfo)
                 .onChange(of: history.changeRevision) { _, _ in model.reload() }
         }
@@ -356,6 +347,22 @@ private struct AccountQuotaCardV2: View {
                     .buttonStyle(.plain)
                     .help("antigravity.useInIDE".localized())
                 }
+
+                Button {
+                    historyModel = history.makeScreen(accountID: account.key, provider: provider)
+                } label: {
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(Color.primary.opacity(0.05))
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .focused($historyButtonFocused)
+                .help("history.title".localized())
+                .accessibilityLabel("history.title".localized())
 
                 Button {
                     Task {
