@@ -397,6 +397,7 @@ fn clean_label(value: &str) -> Result<String, ProviderError> {
 fn claude_window(
     value: &Value,
     label: &str,
+    window_seconds: Option<u64>,
     now: OffsetDateTime,
 ) -> Result<Option<QuotaWindow>, ProviderError> {
     if value.is_null() {
@@ -409,7 +410,7 @@ fn claude_window(
     if used > 100.0 {
         return Err(ProviderError::InvalidData);
     }
-    Ok(Some(common::window(
+    let mut window = common::window(
         label,
         Some(used),
         Some(100.0),
@@ -418,21 +419,25 @@ fn claude_window(
         common::date(object.get("resets_at"))?,
         "claude_oauth_usage",
         now,
-    )?))
+    )?;
+    window.window_seconds = window_seconds;
+    Ok(Some(window))
 }
 
 fn claude_windows(value: &Value, now: OffsetDateTime) -> Result<Vec<QuotaWindow>, ProviderError> {
     let object = value.as_object().ok_or(ProviderError::InvalidData)?;
     let mut windows = Vec::new();
-    for (key, label) in [
-        ("five_hour", "Session"),
-        ("seven_day", "Weekly"),
-        ("seven_day_oauth_apps", "OAuth apps weekly"),
-        ("seven_day_opus", "Opus weekly"),
-        ("seven_day_sonnet", "Sonnet weekly"),
+    const FIVE_HOURS: u64 = 5 * 60 * 60;
+    const SEVEN_DAYS: u64 = 7 * 24 * 60 * 60;
+    for (key, label, seconds) in [
+        ("five_hour", "Session", FIVE_HOURS),
+        ("seven_day", "Weekly", SEVEN_DAYS),
+        ("seven_day_oauth_apps", "OAuth apps weekly", SEVEN_DAYS),
+        ("seven_day_opus", "Opus weekly", SEVEN_DAYS),
+        ("seven_day_sonnet", "Sonnet weekly", SEVEN_DAYS),
     ] {
         if let Some(value) = object.get(key)
-            && let Some(window) = claude_window(value, label, now)?
+            && let Some(window) = claude_window(value, label, Some(seconds), now)?
         {
             windows.push(window);
         }
@@ -447,7 +452,7 @@ fn claude_windows(value: &Value, now: OffsetDateTime) -> Result<Vec<QuotaWindow>
         "cowork",
     ] {
         if let Some(value) = object.get(key) {
-            if let Some(window) = claude_window(value, "Routines weekly", now)? {
+            if let Some(window) = claude_window(value, "Routines weekly", Some(SEVEN_DAYS), now)? {
                 windows.push(window);
             }
             break;
@@ -492,6 +497,7 @@ fn claude_windows(value: &Value, now: OffsetDateTime) -> Result<Vec<QuotaWindow>
                 "claude_oauth_usage",
                 now,
             )?;
+            window.window_seconds = Some(SEVEN_DAYS);
             if window.label == "Fable" {
                 // Preserve history identity when shortening the display label.
                 window.metric_id = Some(crate::cache::fingerprint(&["metric", "Fable weekly"]));

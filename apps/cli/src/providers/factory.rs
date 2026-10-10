@@ -453,6 +453,7 @@ fn parse_windows(
 ) -> Result<Vec<QuotaWindow>, ProviderError> {
     if response.uses_token_rate_limits_billing == Some(false) {
         return Ok(vec![QuotaWindow {
+            window_seconds: None,
             note: Some("legacy-billing".into()),
             metric_id: Some("factory-billing-mode".into()),
             consumption: None,
@@ -511,6 +512,7 @@ fn parse_windows(
                 Confidence::Exact
             };
             windows.push(QuotaWindow {
+                window_seconds: None,
                 note: None,
                 metric_id: Some(format!("factory-{id}-{period}")),
                 consumption: None,
@@ -532,6 +534,7 @@ fn parse_windows(
             return Err(ProviderError::InvalidData);
         }
         windows.push(QuotaWindow {
+            window_seconds: None,
             note: None,
             metric_id: Some("factory-extra-balance".into()),
             consumption: None,

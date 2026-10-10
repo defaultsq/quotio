@@ -3578,6 +3578,11 @@
             ],
             "format": "date-time"
           },
+          "window_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Length of one quota period in seconds, when the source states it or the label names it."
+          },
           "reset_description": {
             "type": [
               "string",
@@ -5464,6 +5469,11 @@
                 "type": "null"
               }
             ]
+          },
+          "window_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Length of one quota period in seconds, when the source states it or the label names it."
           },
           "reset_description": {
             "anyOf": [

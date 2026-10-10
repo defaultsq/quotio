@@ -106,6 +106,7 @@ fn parse_extra_usage(
     .filter(|value| value.is_finite() && *value >= 0.0)
     .ok_or(ProviderError::InvalidData)?;
     Ok(Some(QuotaWindow {
+        window_seconds: None,
         note: None,
         metric_id: Some("codex-extra-usage".into()),
         consumption: None,

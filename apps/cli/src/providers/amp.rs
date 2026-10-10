@@ -72,6 +72,7 @@ fn window(
         }
     };
     QuotaWindow {
+        window_seconds: None,
         note: None,
         metric_id: Some(metric_id),
         consumption: amounts.as_ref().and_then(|a| {

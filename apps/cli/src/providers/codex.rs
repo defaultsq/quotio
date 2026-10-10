@@ -166,6 +166,7 @@ fn parse(
             bucket_windows.push((
                 order,
                 QuotaWindow {
+                    window_seconds: durations[index].map(|minutes| minutes * 60),
                     note: None,
                     metric_id: Some(format!("{bucket_id}-{metric_period}")),
                     consumption: None,

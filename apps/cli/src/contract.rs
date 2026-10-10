@@ -132,6 +132,8 @@ pub struct Metric {
     #[serde(with = "time::serde::rfc3339::option")]
     pub resets_at: Option<OffsetDateTime>,
     pub reset_description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_seconds: Option<u64>,
     #[serde(with = "time::serde::rfc3339")]
     pub fetched_at: OffsetDateTime,
     pub provenance: Provenance,

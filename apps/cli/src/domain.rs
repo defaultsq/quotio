@@ -147,6 +147,9 @@ pub struct QuotaWindow {
     /// Source-provided reset information when an exact timestamp is unavailable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reset_description: Option<String>,
+    /// How long one quota period lasts, when the source states it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_seconds: Option<u64>,
     pub provenance: Provenance,
     #[serde(with = "time::serde::rfc3339")]
     pub fetched_at: OffsetDateTime,

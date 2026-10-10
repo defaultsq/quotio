@@ -396,6 +396,7 @@ mod tests {
             consumption: None,
             resets_at: None,
             reset_description: None,
+            window_seconds: None,
             fetched_at: OffsetDateTime::UNIX_EPOCH,
             provenance: Provenance {
                 source: "fixture".into(),

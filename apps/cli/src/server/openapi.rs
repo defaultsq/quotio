@@ -281,6 +281,7 @@ mod tests {
                     label: "Demo".into(),
                 },
                 windows: vec![crate::domain::QuotaWindow {
+                    window_seconds: None,
                     note: None,
                     metric_id: None,
                     consumption: None,

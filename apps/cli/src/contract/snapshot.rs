@@ -270,6 +270,27 @@ fn plan_display_name(provider: &str, raw: &str) -> String {
     label.into()
 }
 
+/// Period length implied by labels that name it outright, for sources that
+/// never state one. "Session" is not a period: its length varies by provider.
+fn labeled_window_seconds(label: &str) -> Option<u64> {
+    const HOUR: u64 = 60 * 60;
+    let label = label.to_ascii_lowercase();
+    let words: Vec<&str> = label
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let has = |word: &str| words.contains(&word);
+    if label.contains("5-hour") || label.contains("5 hour") || has("5h") {
+        Some(5 * HOUR)
+    } else if has("weekly") || label.contains("7-day") || label.contains("7 day") {
+        Some(7 * 24 * HOUR)
+    } else if has("daily") || has("1d") {
+        Some(24 * HOUR)
+    } else {
+        None
+    }
+}
+
 fn observation(
     account_id: &str,
     value: &ProviderUsage,
@@ -305,6 +326,9 @@ fn observation(
                 consumption: window.consumption.clone(),
                 resets_at: window.resets_at,
                 reset_description: window.reset_description.clone(),
+                window_seconds: window
+                    .window_seconds
+                    .or_else(|| labeled_window_seconds(&window.label)),
                 fetched_at: window.fetched_at,
                 provenance: window.provenance.clone(),
             }
@@ -334,6 +358,7 @@ fn observation(
                     consumption: None,
                     resets_at: None,
                     reset_description: None,
+                    window_seconds: None,
                     fetched_at: weekly.fetched_at,
                     provenance: Provenance {
                         source: "antigravity_weekly_limit".into(),
