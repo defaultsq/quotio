@@ -306,7 +306,8 @@ struct QuotioHostPresentationMapper {
             tooltip: [window.note, window.resetDescription]
                 .compactMap { $0 }
                 .joined(separator: "\n"),
-            group: window.group
+            group: window.group,
+            windowDuration: window.windowSeconds
         )
     }
 

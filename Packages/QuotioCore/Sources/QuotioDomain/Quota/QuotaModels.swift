@@ -166,6 +166,8 @@ public struct QuotaMetric: Codable, Equatable, Identifiable, Sendable {
     public var limit: Int?
     public var remaining: Int?
     public var tooltip: String?
+    /// Length of one quota period, when known. Pace needs it to place the expected-remaining mark.
+    public var windowDuration: TimeInterval?
 
     public var id: String { backendID ?? name }
     public var usedPercentage: Double { 100 - percentage }
@@ -180,7 +182,8 @@ public struct QuotaMetric: Codable, Equatable, Identifiable, Sendable {
         limit: Int? = nil,
         remaining: Int? = nil,
         tooltip: String? = nil,
-        group: String? = nil
+        group: String? = nil,
+        windowDuration: TimeInterval? = nil
     ) {
         self.group = group
         self.name = name
@@ -192,6 +195,7 @@ public struct QuotaMetric: Codable, Equatable, Identifiable, Sendable {
         self.limit = limit
         self.remaining = remaining
         self.tooltip = tooltip
+        self.windowDuration = windowDuration
     }
 }
 
