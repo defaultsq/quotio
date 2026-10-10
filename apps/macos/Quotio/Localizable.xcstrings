@@ -1,6 +1,30 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "settings.quota.style.compact" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Compact"}},"fr":{"stringUnit":{"state":"translated","value":"Compact"}},"vi":{"stringUnit":{"state":"translated","value":"Gọn"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"紧凑"}}}},
+    "settings.quota.style.comfortable" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Comfortable"}},"fr":{"stringUnit":{"state":"translated","value":"Confortable"}},"vi":{"stringUnit":{"state":"translated","value":"Thoáng"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"舒适"}}}},
+    "settings.quota.style.detailed" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Detailed"}},"fr":{"stringUnit":{"state":"translated","value":"Détaillé"}},"vi":{"stringUnit":{"state":"translated","value":"Chi tiết"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"详细"}}}},
+    "settings.quota.style.compact.help" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"One line per account"}},"fr":{"stringUnit":{"state":"translated","value":"Une ligne par compte"}},"vi":{"stringUnit":{"state":"translated","value":"Mỗi tài khoản một dòng"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"每个账户一行"}}}},
+    "settings.quota.style.comfortable.help" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Every limit, with pace"}},"fr":{"stringUnit":{"state":"translated","value":"Chaque limite, avec le rythme"}},"vi":{"stringUnit":{"state":"translated","value":"Mọi hạn mức, kèm nhịp dùng"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"每项限额及用量节奏"}}}},
+    "settings.quota.style.detailed.help" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Adds trend and advice"}},"fr":{"stringUnit":{"state":"translated","value":"Ajoute tendance et conseils"}},"vi":{"stringUnit":{"state":"translated","value":"Thêm xu hướng và gợi ý"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"增加趋势和建议"}}}},
+    "settings.quota.pace.help" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The black tick marks an even pace until the reset. A bar turns amber when it is on track to run out before then."}},"fr":{"stringUnit":{"state":"translated","value":"Le trait noir marque un rythme régulier jusqu’à la réinitialisation. La barre devient orange si le quota risque d’être épuisé avant."}},"vi":{"stringUnit":{"state":"translated","value":"Vạch đen đánh dấu mức dùng đều đến lúc reset. Thanh chuyển màu cam khi hạn mức có thể cạn trước thời điểm đó."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"黑色刻度表示到重置前的均匀用量。若按当前速度会提前用完，进度条会变为橙色。"}}}},
+    "quota.reset.in" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"resets in %@"}},"fr":{"stringUnit":{"state":"translated","value":"réinit. dans %@"}},"vi":{"stringUnit":{"state":"translated","value":"reset sau %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%@ 后重置"}}}},
+    "quota.reset.at" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"resets %@"}},"fr":{"stringUnit":{"state":"translated","value":"réinit. %@"}},"vi":{"stringUnit":{"state":"translated","value":"reset %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%@ 重置"}}}},
+    "quota.pace.emptyAt" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"At this pace, empty %@"}},"fr":{"stringUnit":{"state":"translated","value":"À ce rythme, épuisé %@"}},"vi":{"stringUnit":{"state":"translated","value":"Với tốc độ này, cạn vào %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"按此速度，%@ 用完"}}}},
+    "quota.pace.emptyShort" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"empty %@"}},"fr":{"stringUnit":{"state":"translated","value":"épuisé %@"}},"vi":{"stringUnit":{"state":"translated","value":"cạn %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%@ 用完"}}}},
+    "quota.exhausted.title" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"%@ used up"}},"fr":{"stringUnit":{"state":"translated","value":"%@ épuisé"}},"vi":{"stringUnit":{"state":"translated","value":"Đã dùng hết %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%@ 已用完"}}}},
+    "quota.exhausted.back" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Back at %@"}},"fr":{"stringUnit":{"state":"translated","value":"De retour à %@"}},"vi":{"stringUnit":{"state":"translated","value":"Có lại lúc %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%@ 恢复"}}}},
+    "quota.countdown.in" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"in %@"}},"fr":{"stringUnit":{"state":"translated","value":"dans %@"}},"vi":{"stringUnit":{"state":"translated","value":"sau %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%@ 后"}}}},
+    "quota.signInAgain" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Sign in again"}},"fr":{"stringUnit":{"state":"translated","value":"Reconnectez-vous"}},"vi":{"stringUnit":{"state":"translated","value":"Đăng nhập lại"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"重新登录"}}}},
+    "quota.pace.rate" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Using ~%@ a day."}},"fr":{"stringUnit":{"state":"translated","value":"Environ %@ par jour."}},"vi":{"stringUnit":{"state":"translated","value":"Đang dùng ~%@ mỗi ngày."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"每天约用 %@。"}}}},
+    "quota.pace.budget" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"To last until %@, stay under ~%@ a day."}},"fr":{"stringUnit":{"state":"translated","value":"Pour tenir jusqu’à %@, restez sous ~%@ par jour."}},"vi":{"stringUnit":{"state":"translated","value":"Để đủ đến %@, hãy dùng dưới ~%@ mỗi ngày."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"要撑到 %@，每天需少于约 %@。"}}}},
+    "quota.pace.onTrack" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"On pace to last until the reset."}},"fr":{"stringUnit":{"state":"translated","value":"À ce rythme, le quota tiendra jusqu’à la réinitialisation."}},"vi":{"stringUnit":{"state":"translated","value":"Với nhịp này sẽ đủ đến lúc reset."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"按当前节奏可撑到重置。"}}}},
+    "quota.pace.noRate" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Not enough use yet to estimate a rate."}},"fr":{"stringUnit":{"state":"translated","value":"Pas encore assez d’usage pour estimer un rythme."}},"vi":{"stringUnit":{"state":"translated","value":"Chưa dùng đủ để ước tính tốc độ."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"用量尚少，无法估算速度。"}}}},
+    "quota.pace.estimated" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Estimated"}},"fr":{"stringUnit":{"state":"translated","value":"Estimation"}},"vi":{"stringUnit":{"state":"translated","value":"Ước tính"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"估算"}}}},
+    "quota.chart.now" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Now"}},"fr":{"stringUnit":{"state":"translated","value":"Maint."}},"vi":{"stringUnit":{"state":"translated","value":"Giờ"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"现在"}}}},
+    "quota.chart.reset" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Reset %@"}},"fr":{"stringUnit":{"state":"translated","value":"Réinit. %@"}},"vi":{"stringUnit":{"state":"translated","value":"Reset %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%@ 重置"}}}},
+    "quota.window.day" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"day"}},"fr":{"stringUnit":{"state":"translated","value":"jour"}},"vi":{"stringUnit":{"state":"translated","value":"ngày"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"日"}}}},
+    "quota.window.week" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"wk"}},"fr":{"stringUnit":{"state":"translated","value":"sem."}},"vi":{"stringUnit":{"state":"translated","value":"tuần"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"周"}}}},
     "history.chooseMetric" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Select a metric to inspect its observed states"}},"fr":{"stringUnit":{"state":"translated","value":"Sélectionnez un indicateur pour examiner ses états observés"}},"vi":{"stringUnit":{"state":"translated","value":"Chọn chỉ số để xem các trạng thái đã ghi nhận"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"选择指标以查看其观测状态"}}}},
     "history.hostChanged" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The host changed. Close this sheet and reopen history for the selected host."}},"fr":{"stringUnit":{"state":"translated","value":"L’hôte a changé. Fermez cette feuille et rouvrez l’historique de l’hôte sélectionné."}},"vi":{"stringUnit":{"state":"translated","value":"Máy chủ đã thay đổi. Đóng bảng này và mở lại lịch sử cho máy chủ đã chọn."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"主机已更改。请关闭此面板，然后重新打开所选主机的历史。"}}}},
     "history.title" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Quota history"}},"fr":{"stringUnit":{"state":"translated","value":"Historique du quota"}},"vi":{"stringUnit":{"state":"translated","value":"Lịch sử hạn mức"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"配额历史"}}}},
@@ -16391,93 +16415,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "剩余"
-          }
-        }
-      }
-    },
-    "settings.quota.style.card" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Card"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Carte"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Thẻ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "卡片"
-          }
-        }
-      }
-    },
-    "settings.quota.style.lowestBar" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lowest Bar Only"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Barre la plus basse uniquement"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Chỉ thanh thấp nhất"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仅最低进度条"
-          }
-        }
-      }
-    },
-    "settings.quota.style.ring" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ring"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Anneau"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vòng"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "圆环"
           }
         }
       }

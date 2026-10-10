@@ -82,7 +82,7 @@ final class StatusBarMenuSnapshotMapperTests: XCTestCase {
         let preferences = MenuBarPreferences(
             selectedProvider: .amp,
             quotaDisplayMode: .remaining,
-            quotaDisplayStyle: .ring,
+            quotaDisplayStyle: .detailed,
             hideSensitiveInfo: true,
             modelAggregationMode: .average
         )
@@ -98,7 +98,7 @@ final class StatusBarMenuSnapshotMapperTests: XCTestCase {
         XCTAssertNil(snapshot.selectedProvider)
         XCTAssertTrue(snapshot.isLoadingQuotas)
         XCTAssertEqual(snapshot.displaySettings.quotaDisplayMode, .remaining)
-        XCTAssertEqual(snapshot.displaySettings.quotaDisplayStyle, .ring)
+        XCTAssertEqual(snapshot.displaySettings.quotaDisplayStyle, .detailed)
         XCTAssertTrue(snapshot.displaySettings.hideSensitiveInfo)
         XCTAssertEqual(snapshot.displaySettings.modelAggregationMode, .average)
         XCTAssertEqual(snapshot.language, .vietnamese)
@@ -171,7 +171,7 @@ final class StatusBarMenuRendererTests: XCTestCase {
                 }
                 let snapshot = StatusBarMenuSnapshotMapper.makeSnapshot(
                     monitorAccounts: [], quota: QuotaSnapshot(quotas: [provider: ["Account": ProviderQuota(models: models)]]),
-                    menuBarPreferences: MenuBarPreferences(selectedProvider: provider, quotaDisplayStyle: .card), language: .english
+                    menuBarPreferences: MenuBarPreferences(selectedProvider: provider, quotaDisplayStyle: .comfortable), language: .english
                 )
                 let renderer = StatusBarMenuRenderer(snapshot: snapshot, commands: commands)
                 let menu = renderer.buildMenu()

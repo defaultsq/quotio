@@ -76,7 +76,7 @@ public final class UserDefaultsMenuBarPreferencesRepository: MenuBarPreferencesR
             selectedProvider: selectedProvider.flatMap(QuotaProvider.init(rawValue:)),
             colorMode: MenuBarColorMode(rawValue: defaults.string(forKey: "menuBarColorMode") ?? "") ?? .monochrome,
             quotaDisplayMode: QuotaDisplayMode(rawValue: defaults.string(forKey: "quotaDisplayMode") ?? "") ?? .remaining,
-            quotaDisplayStyle: QuotaDisplayStyle(rawValue: defaults.string(forKey: "quotaDisplayStyle") ?? "") ?? .card,
+            quotaDisplayStyle: QuotaDisplayStyle(storedValue: defaults.string(forKey: "quotaDisplayStyle") ?? "") ?? .comfortable,
             stackPairedQuotaMetrics: defaults.bool(forKey: "menuBarStackClaudeQuotaWindows"),
             hideSensitiveInfo: defaults.bool(forKey: "hideSensitiveInfo"),
             totalUsageMode: TotalUsageMode(rawValue: defaults.string(forKey: "totalUsageMode") ?? "") ?? .sessionOnly,

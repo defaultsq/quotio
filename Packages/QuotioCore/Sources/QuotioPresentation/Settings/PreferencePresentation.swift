@@ -126,17 +126,25 @@ public extension QuotaDisplayMode {
 public extension QuotaDisplayStyle {
     var localizationKey: String {
         switch self {
-        case .card: "settings.quota.style.card"
-        case .lowestBar: "settings.quota.style.lowestBar"
-        case .ring: "settings.quota.style.ring"
+        case .compact: "settings.quota.style.compact"
+        case .comfortable: "settings.quota.style.comfortable"
+        case .detailed: "settings.quota.style.detailed"
+        }
+    }
+
+    var helpKey: String {
+        switch self {
+        case .compact: "settings.quota.style.compact.help"
+        case .comfortable: "settings.quota.style.comfortable.help"
+        case .detailed: "settings.quota.style.detailed.help"
         }
     }
 
     var iconName: String {
         switch self {
-        case .card: "rectangle.portrait"
-        case .lowestBar: "chart.bar.fill"
-        case .ring: "circle.dotted"
+        case .compact: "list.bullet"
+        case .comfortable: "rectangle.grid.1x2"
+        case .detailed: "chart.xyaxis.line"
         }
     }
 }

@@ -67,12 +67,22 @@ public enum QuotaDisplayMode: String, Codable, CaseIterable, Identifiable, Senda
     }
 }
 
+/// How much of each account's quota the menu shows.
 public enum QuotaDisplayStyle: String, Codable, CaseIterable, Identifiable, Sendable {
-    case card = "card"
-    case lowestBar = "lowestBar"
-    case ring = "ring"
+    case compact
+    case comfortable
+    case detailed
 
     public var id: String { rawValue }
+
+    /// Reads a stored value, mapping the retired card, lowest-bar and ring styles.
+    public init?(storedValue: String) {
+        switch storedValue {
+        case "card", "ring": self = .comfortable
+        case "lowestBar": self = .compact
+        default: self.init(rawValue: storedValue)
+        }
+    }
 }
 
 public enum TotalUsageMode: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -112,7 +122,7 @@ public struct MenuBarPreferences: Equatable, Sendable {
         selectedProvider: QuotaProvider? = nil,
         colorMode: MenuBarColorMode = .monochrome,
         quotaDisplayMode: QuotaDisplayMode = .remaining,
-        quotaDisplayStyle: QuotaDisplayStyle = .card,
+        quotaDisplayStyle: QuotaDisplayStyle = .comfortable,
         stackPairedQuotaMetrics: Bool = true,
         hideSensitiveInfo: Bool = false,
         totalUsageMode: TotalUsageMode = .sessionOnly,

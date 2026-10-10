@@ -25,15 +25,6 @@ struct QuotaDisplayHelper {
         let clamped = max(0, min(100, remainingPercent))
         return displayMode == .used ? (100 - clamped) : clamped
     }
-
-    /// Percentage for ring rendering. Unlike `displayPercent(remainingPercent:)`
-    /// this keeps the "no data" sentinel instead of clamping it into a real
-    /// value, so `RingProgressView` can render its unknown state.
-    func ringPercent(remainingPercent: Double) -> Double {
-        remainingPercent < 0
-            ? RingProgressView.unknownPercent
-            : displayPercent(remainingPercent: remainingPercent)
-    }
 }
 
 struct ProviderQuotaView: View {
@@ -557,7 +548,7 @@ private struct AccountQuotaCardV2: View {
 
     @ViewBuilder
     private func standardContentByStyle(data: ProviderQuota) -> some View {
-        let isCard = displayStyle == .card
+        let isCard = displayStyle != .compact
         let meterModels = data.models.filter { !$0.isStandaloneMetric }
         let standaloneModels = data.models.filter(\.isStandaloneMetric)
         VStack(spacing: 12) {
@@ -578,11 +569,9 @@ private struct AccountQuotaCardV2: View {
     @ViewBuilder
     private func meterContentByStyle(models: [QuotaMetric]) -> some View {
         switch displayStyle {
-        case .lowestBar:
+        case .compact:
             StandardLowestBarLayout(models: models)
-        case .ring:
-            StandardRingLayout(models: models)
-        case .card:
+        case .comfortable, .detailed:
             VStack(spacing: 12) {
                 ForEach(models) { model in
                     UsageRowV2(
@@ -830,55 +819,6 @@ private struct StandardLowestBarLayout: View {
         }
     }
 }
-
-// MARK: - Standard Ring Layout
-
-private struct StandardRingLayout: View {
-    let models: [QuotaMetric]
-
-    @Environment(MenuBarSettingsManager.self) private var settings
-    private var displayHelper: QuotaDisplayHelper {
-        QuotaDisplayHelper(displayMode: settings.quotaDisplayMode)
-    }
-
-    private var columns: [GridItem] {
-        let count = min(max(models.count, 1), 4)
-        return Array(repeating: GridItem(.flexible(), spacing: 12), count: count)
-    }
-
-    private func ringPercent(for remainingPercent: Double) -> Double {
-        displayHelper.ringPercent(remainingPercent: remainingPercent)
-    }
-
-    var body: some View {
-        LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(models) { model in
-                VStack(spacing: 6) {
-                    RingProgressView(
-                        percent: ringPercent(for: model.percentage),
-                        size: 44,
-                        lineWidth: 5,
-                        tint: displayHelper.statusColor(remainingPercent: model.percentage),
-                        showLabel: true
-                    )
-
-                    Text(model.displayName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    if model.formattedResetTime != "—" && !model.formattedResetTime.isEmpty {
-                        Text(model.formattedResetTime)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Antigravity Models Detail Sheet
 
 private struct AntigravityModelsDetailSheet: View {
     let email: String

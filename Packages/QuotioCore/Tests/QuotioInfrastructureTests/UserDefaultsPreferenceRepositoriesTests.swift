@@ -196,7 +196,7 @@ final class UserDefaultsPreferenceRepositoriesTests: XCTestCase {
             selectedProvider: .codex,
             colorMode: .monochrome,
             quotaDisplayMode: .remaining,
-            quotaDisplayStyle: .ring,
+            quotaDisplayStyle: .detailed,
             stackPairedQuotaMetrics: false,
             hideSensitiveInfo: true,
             totalUsageMode: .combined,

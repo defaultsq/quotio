@@ -192,7 +192,7 @@ final class StatusBarMenuRenderer {
                     menu.addItem(emptyItem)
                 } else {
                     for (accountIndex, account) in providerSnapshot.accounts.enumerated() {
-                        if accountIndex > 0 {
+                        if accountIndex > 0 && snapshot.displaySettings.quotaDisplayStyle != .compact {
                             let separator = NSMenuItem.separator()
                             providerFilterController.register(
                                 separator,
@@ -552,15 +552,19 @@ private struct MenuAccountCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            headerSection
-
-            quotaContentSection
-
-            footerSection
+        Group {
+            if settings.quotaDisplayStyle == .compact {
+                MenuCompactAccountRow(email: email, data: data, provider: provider,
+                                      hasDetail: hasDetail, settings: settings)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    headerSection
+                    quotaContentSection
+                }
+            }
         }
         .padding(.horizontal, MenuItemMetrics.contentInset)
-        .padding(.vertical, 8)
+        .padding(.vertical, settings.quotaDisplayStyle == .compact ? 6 : 8)
         .background {
             if isHighlighted {
                 RoundedRectangle(cornerRadius: MenuItemMetrics.highlightCornerRadius, style: .continuous)
@@ -583,18 +587,15 @@ private struct MenuAccountCardView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
 
+            Spacer(minLength: 4)
+
             if let planName {
                 Text(planName)
-                    .font(.caption.weight(.medium))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.fill.quaternary, in: Capsule())
                     .fixedSize()
             }
-
-            Spacer(minLength: 4)
 
             RefreshButton(title: "action.refreshQuota".localized(), isRefreshing: isRefreshing, action: onRefresh)
             .labelStyle(.iconOnly)
@@ -616,13 +617,18 @@ private struct MenuAccountCardView: View {
     }
 
     // MARK: - Quota Content
-    
+
     private var quotaContentSection: some View {
         let groups = data.metricGroups
         let standaloneModels = data.models.filter(\.isStandaloneMetric)
+        let meters = groups.flatMap(\.models).map { QuotaMeter(metric: $0, displayMode: settings.quotaDisplayMode) }
+        let burnID = settings.quotaDisplayStyle == .detailed ? Self.burnMetricID(meters) : nil
 
-        return VStack(spacing: 8) {
-            if groups.isEmpty && standaloneModels.isEmpty {
+        return VStack(spacing: 10) {
+            if data.isForbidden {
+                MenuSignInAgainLabel()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if groups.isEmpty && standaloneModels.isEmpty {
                 Text("dashboard.noQuotaData".localized())
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -637,9 +643,16 @@ private struct MenuAccountCardView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                quotaLayout(models: group.models.map {
-                    ModelBadgeData(id: $0.id, name: $0.displayName, percentage: $0.percentage, resetTime: $0.resetTime)
-                })
+                ForEach(group.models) { metric in
+                    let meter = QuotaMeter(metric: metric, displayMode: settings.quotaDisplayMode)
+                    if meter.isExhausted {
+                        QuotaExhaustedBanner(meter: meter)
+                    } else if metric.id == burnID, let pace = meter.pace {
+                        QuotaBurnCard(meter: meter, pace: pace)
+                    } else {
+                        QuotaLimitRow(meter: meter)
+                    }
+                }
             }
 
             ForEach(standaloneModels) { model in
@@ -657,25 +670,105 @@ private struct MenuAccountCardView: View {
         }
     }
 
-    @ViewBuilder
-    private func quotaLayout(models: [ModelBadgeData]) -> some View {
-        switch settings.quotaDisplayStyle {
-        case .lowestBar:
-            LowestBarLayout(models: models, displayMode: settings.quotaDisplayMode)
-        case .ring:
-            RingGridLayout(models: models, displayMode: settings.quotaDisplayMode)
-        case .card:
-            CardGridLayout(models: models, displayMode: settings.quotaDisplayMode)
+    /// Detailed charts the paced limit with the longest window, which is the
+    /// one whose trend says most about the days ahead.
+    private static func burnMetricID(_ meters: [QuotaMeter]) -> String? {
+        meters.filter { $0.pace != nil && !$0.isExhausted }
+            .max { ($0.metric.windowDuration ?? 0) < ($1.metric.windowDuration ?? 0) }?
+            .metric.id
+    }
+}
+
+/// Compact density: one line per account with a mini bar per limit and the
+/// value of whichever limit runs out first.
+private struct MenuCompactAccountRow: View {
+    let email: String
+    let data: ProviderQuota
+    let provider: QuotaProvider
+    let hasDetail: Bool
+    let settings: StatusBarMenuDisplaySettings
+
+    private var meters: [QuotaMeter] {
+        data.metricGroups.flatMap(\.models)
+            .map { QuotaMeter(metric: $0, displayMode: settings.quotaDisplayMode) }
+            .filter(\.hasData)
+    }
+
+    var body: some View {
+        let meters = meters
+        let binding = meters.min { $0.remaining < $1.remaining }
+        let isOut = binding?.isExhausted ?? false
+        HStack(spacing: 8) {
+            ProviderIconMono(provider: provider, size: 16)
+                .foregroundStyle(.secondary)
+            SensitiveAccountText(value: email, isSensitive: settings.hideSensitiveInfo)
+                .font(.callout)
+                .foregroundStyle(isOut ? .secondary : .primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if data.isForbidden {
+                MenuSignInAgainLabel()
+            } else if let binding {
+                VStack(spacing: 3) {
+                    ForEach(meters.prefix(2), id: \.metric.id) { meter in
+                        QuotaPaceBar(meter: meter, height: 4, tickOverhang: 2)
+                    }
+                }
+                .frame(width: 56)
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(binding.valueText)
+                        .font(.callout.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(binding.valueColor)
+                    detail(for: binding)
+                        .font(.caption2)
+                        .lineLimit(1)
+                }
+                .frame(minWidth: 64, alignment: .trailing)
+            } else {
+                Text("—").foregroundStyle(.secondary)
+            }
+            if hasDetail {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+        }
+        .help(meters.map { "\($0.name) \($0.valueText)" }.joined(separator: "\n"))
+    }
+
+    @ViewBuilder private func detail(for meter: QuotaMeter) -> some View {
+        if meter.isExhausted, let reset = meter.resetsAt, reset > Date() {
+            Text(String(format: "quota.countdown.in".localized(), QuotaTimeText.duration(until: reset)))
+                .foregroundStyle(.secondary)
+        } else if meter.tone == .behind, let empty = meter.pace?.projectedEmpty {
+            Text(String(format: "quota.pace.emptyShort".localized(), QuotaTimeText.weekday(empty)))
+                .foregroundStyle(.orange)
+        } else if let reset = meter.resetsAt, reset > Date() {
+            let when = reset.timeIntervalSinceNow < 86_400
+                ? QuotaTimeText.duration(until: reset) : QuotaTimeText.weekday(reset)
+            Text(Self.shortName(meter) + " · " + when)
+                .foregroundStyle(.secondary)
         }
     }
-    
-    // MARK: - Footer
 
-    private var footerSection: some View {
-        Text(data.lastUpdated.formatted(.relative(presentation: .named)))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .trailing)
+    private static func shortName(_ meter: QuotaMeter) -> String {
+        switch meter.metric.windowDuration {
+        case 18_000: "5h"
+        case 86_400: "quota.window.day".localized()
+        case 604_800: "quota.window.week".localized()
+        default: meter.name
+        }
+    }
+}
+
+private struct MenuSignInAgainLabel: View {
+    var body: some View {
+        Label("quota.signInAgain".localized(), systemImage: "exclamationmark.circle.fill")
+            .font(.callout.weight(.medium))
+            .foregroundStyle(.red)
+            .lineLimit(1)
     }
 }
 
@@ -1421,270 +1514,6 @@ private struct AnalyticsRowView: View {
                 .multilineTextAlignment(.trailing)
                 .lineLimit(1)
         }
-    }
-}
-
-private struct ModelBadgeData: Identifiable {
-    let id: String
-    let name: String
-    let percentage: Double
-    let resetTime: String?
-    let usage: String?
-
-    init(id: String, name: String, percentage: Double, resetTime: String?, usage: String? = nil) {
-        self.id = id
-        self.name = name
-        self.percentage = percentage
-        self.resetTime = resetTime
-        self.usage = usage
-    }
-
-
-    var formattedResetTime: String? {
-        guard let resetTime = resetTime else { return nil }
-
-        // Try parsing with fractional seconds first, then standard format
-        let isoFormatterWithFractional = ISO8601DateFormatter()
-        isoFormatterWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        let isoFormatterStandard = ISO8601DateFormatter()
-        isoFormatterStandard.formatOptions = [.withInternetDateTime]
-
-        guard let date = isoFormatterWithFractional.date(from: resetTime)
-              ?? isoFormatterStandard.date(from: resetTime) else { return nil }
-
-        let now = Date()
-        let diff = date.timeIntervalSince(now)
-        guard diff > 0 else { return nil }
-
-        let totalMinutes = Int(diff) / 60
-        let days = totalMinutes / 1440  // 24 * 60
-        let hours = (totalMinutes % 1440) / 60
-        let minutes = totalMinutes % 60
-
-        if days > 0 {
-            return "\(days)d\(hours)h"
-        } else if hours > 0 {
-            return "\(hours)h\(minutes)m"
-        } else {
-            return "\(minutes)m"
-        }
-    }
-}
-
-private func menuDisplayPercent(remainingPercent: Double, displayMode: QuotaDisplayMode) -> Double {
-    displayMode.displayValue(from: remainingPercent)
-}
-
-/// Formatted percentage for menu rows. A negative remaining percentage means
-/// "no data yet" and renders as a placeholder instead of a fake value like 101%.
-private func menuPercentText(remainingPercent: Double, displayMode: QuotaDisplayMode) -> String {
-    guard remainingPercent >= 0 else { return "—" }
-    return "\(Int(menuDisplayPercent(remainingPercent: remainingPercent, displayMode: displayMode)))%"
-}
-
-/// Status tint for quota meters. Numbers stay in label colors so the value is
-/// readable on the menu material regardless of tint.
-private func menuStatusColor(remainingPercent: Double, displayMode: QuotaDisplayMode) -> Color {
-    guard remainingPercent >= 0 else { return .secondary }
-    let usedPercent = 100 - remainingPercent
-    let checkValue = displayMode == .used ? usedPercent : remainingPercent
-
-    if displayMode == .used {
-        if checkValue < 70 { return .green }
-        if checkValue < 90 { return .orange }
-        return .red
-    } else {
-        if checkValue > 50 { return .green }
-        if checkValue > 20 { return .orange }
-        return .red
-    }
-}
-
-// MARK: - Layout Subviews
-
-private struct LowestBarLayout: View {
-    let models: [ModelBadgeData]
-    let displayMode: QuotaDisplayMode
-
-    private var sorted: [ModelBadgeData] {
-        models.sorted { $0.percentage < $1.percentage }
-    }
-
-    var body: some View {
-        VStack(spacing: 6) {
-            if let lowest = sorted.first {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(lowest.name)
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Spacer(minLength: 8)
-                        Text(menuPercentText(remainingPercent: lowest.percentage, displayMode: displayMode))
-                            .font(.callout.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(.primary)
-                    }
-
-                    ModernProgressBar(
-                        percentage: lowest.percentage,
-                        height: 6,
-                        displayMode: displayMode
-                    )
-
-                    if let resetTime = lowest.formattedResetTime {
-                        HStack(spacing: 4) {
-                            Image(systemName: "clock.arrow.circlepath")
-                            Text(resetTime)
-                                .monospacedDigit()
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(8)
-                .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-
-            ForEach(sorted.dropFirst(), id: \.name) { (model: ModelBadgeData) in
-                HStack(spacing: 6) {
-                    Text(model.name)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer()
-                    if let resetTime = model.formattedResetTime {
-                        Text(resetTime)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(menuPercentText(remainingPercent: model.percentage, displayMode: displayMode))
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                }
-                .font(.caption)
-                .padding(.horizontal, 8)
-            }
-        }
-    }
-}
-
-private struct RingGridLayout: View {
-    let models: [ModelBadgeData]
-    let displayMode: QuotaDisplayMode
-
-    private var columnCount: Int {
-        min(max(models.count, 1), 4)
-    }
-
-    private var columns: [GridItem] {
-        Array(repeating: GridItem(.flexible()), count: columnCount)
-    }
-
-    private var ringSize: CGFloat {
-        columnCount >= 4 ? 36 : 40
-    }
-
-    var body: some View {
-        LazyVGrid(columns: columns, spacing: 10) {
-            ForEach(models, id: \.name) { (model: ModelBadgeData) in
-                VStack(spacing: 3) {
-                    RingProgressView(percent: menuDisplayPercent(remainingPercent: model.percentage, displayMode: displayMode), size: ringSize, lineWidth: 4, tint: menuStatusColor(remainingPercent: model.percentage, displayMode: displayMode), showLabel: true)
-
-                    Text(model.name)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    if let resetTime = model.formattedResetTime {
-                        Text(resetTime)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .help(model.name)
-            }
-        }
-    }
-}
-
-private struct CardGridLayout: View {
-    let models: [ModelBadgeData]
-    let displayMode: QuotaDisplayMode
-
-    private var columns: [GridItem] {
-        // Single metric: full width. Multiple: 2 columns
-        if models.count == 1 {
-            return [GridItem(.flexible())]
-        } else {
-            return [GridItem(.flexible()), GridItem(.flexible())]
-        }
-    }
-
-    var body: some View {
-        LazyVGrid(columns: columns, spacing: 6) {
-            ForEach(models, id: \.name) { (model: ModelBadgeData) in
-                let resetTime = model.formattedResetTime
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 4) {
-                        Text(model.name)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Spacer(minLength: 2)
-                        Text(model.usage ?? menuPercentText(remainingPercent: model.percentage, displayMode: displayMode))
-                            .fontWeight(.semibold)
-                            .monospacedDigit()
-                            .foregroundStyle(.primary)
-                    }
-                    .font(.caption)
-
-                    if model.usage == nil {
-                        ModernProgressBar(
-                            percentage: model.percentage,
-                            height: 4,
-                            displayMode: displayMode
-                        )
-                    }
-                    Text(resetTime ?? " ")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .accessibilityHidden(resetTime == nil)
-                }
-                .padding(8)
-                .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .help(model.name)
-            }
-        }
-    }
-}
-
-// MARK: - Shared Components
-
-private struct ModernProgressBar: View {
-    let percentage: Double
-    let height: CGFloat
-    let displayMode: QuotaDisplayMode
-
-    private var displayPercent: Double {
-        menuDisplayPercent(remainingPercent: percentage, displayMode: displayMode)
-    }
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(.fill.tertiary)
-
-                Capsule()
-                    .fill(menuStatusColor(remainingPercent: percentage, displayMode: displayMode))
-                    .frame(width: proxy.size.width * min(1, max(0, displayPercent / 100)))
-            }
-        }
-        .frame(height: height)
-        .accessibilityHidden(true)
     }
 }
 
