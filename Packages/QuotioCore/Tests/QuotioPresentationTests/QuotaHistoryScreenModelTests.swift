@@ -197,7 +197,7 @@ final class QuotaHistoryScreenModelTests: XCTestCase {
 
 }
 
-private actor ControlledHistory: QuotaHistoryReading, QuotaHistoryManaging {
+actor ControlledHistory: QuotaHistoryReading, QuotaHistoryManaging {
     private var availability: QuotaHistoryAvailability
     private let percentageMetrics: Bool
     private var page: QuotaHistoryEventsPage?

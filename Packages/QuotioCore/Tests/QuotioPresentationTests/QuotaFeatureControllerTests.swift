@@ -212,6 +212,8 @@ final class QuotaFeatureControllerTests: XCTestCase {
         let state = ProviderSettingsState(provider: .amp, accounts: fixture.controller.accounts.accounts,
             permissions: [], quota: fixture.quota.state, tracking: fixture.controller.trackingPreferences)
         XCTAssertEqual(state.accounts.count, 1)
+        let reader = ControlledHistory()
+        let history = QuotaHistoryServiceModel(useCases: .init(reader: reader, manager: reader), coordinator: TestQuotaCoordinator())
         for width: CGFloat in [360, 480] {
             let view = ProviderAccountsSection(state: state, visibleAccounts: state.accounts)
                 .environment(AccountsSettingsScreenModel())
@@ -221,6 +223,7 @@ final class QuotaFeatureControllerTests: XCTestCase {
                 .environment(fixture.controller)
                 .environment(fixture.menuBar)
                 .environment(ProviderImageScreenModel { _, _ in nil })
+                .environment(history)
                 .frame(width: width)
             let host = NSHostingView(rootView: view)
             host.layoutSubtreeIfNeeded()
