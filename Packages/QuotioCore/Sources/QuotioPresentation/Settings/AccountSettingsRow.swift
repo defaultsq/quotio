@@ -13,6 +13,7 @@ struct AccountSettingsRow: View {
     @Environment(QuotaScreenModel.self) private var quota
     @Environment(QuotaFeatureController.self) private var controller
     @Environment(MenuBarSettingsManager.self) private var menuBar
+    @Environment(QuotaHistoryServiceModel.self) private var history
     @Environment(AccountsSettingsScreenModel.self) private var model
     @State private var isHovering = false
 
@@ -179,6 +180,9 @@ struct AccountSettingsRow: View {
         }
         Button("action.refresh".localized()) { Task { await controller.refresh(account: quotaID) } }
             .disabled(account.isDisabled || isRefreshing)
+        Button("history.title".localized() + "…") {
+            model.sheet = .history(provider, account, history.makeScreen(accountID: account.accountKey, provider: provider))
+        }
         Divider()
         Toggle("settings.pauseAccount".localized(), isOn: Binding(
             get: { account.isDisabled },

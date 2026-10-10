@@ -8,6 +8,7 @@ struct AccountsSettingsScreen: View {
     @Environment(QuotaScreenModel.self) private var quota
     @Environment(QuotaFeatureController.self) private var controller
     @Environment(MenuBarSettingsManager.self) private var menuBar
+    @Environment(QuotaHistoryServiceModel.self) private var history
     @State private var model = AccountsSettingsScreenModel()
     @State private var search = ""
     @State private var showUnconnected = false
@@ -91,6 +92,10 @@ struct AccountsSettingsScreen: View {
                     try await controller.saveAPIKey(provider: provider, label: label, apiKey: key,
                         existingAccountID: account?.id, fields: fields)
                 }
+            case .history(let provider, let account, let screen):
+                QuotaHistorySheet(model: screen, accountName: account.displayName, provider: provider,
+                                  displayMode: menuBar.quotaDisplayMode, hideSensitiveInfo: menuBar.hideSensitiveInfo)
+                    .onChange(of: history.changeRevision) { _, _ in screen.reload() }
             }
         }
         .confirmationDialog("settings.replacePinnedAccount".localized(), isPresented: Binding(
