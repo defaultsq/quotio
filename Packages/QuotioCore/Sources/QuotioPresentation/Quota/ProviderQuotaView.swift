@@ -351,8 +351,13 @@ private struct AccountQuotaCardV2: View {
                 Button {
                     historyModel = history.makeScreen(accountID: account.key, provider: provider)
                 } label: {
-                    Image(systemName: "chart.bar.xaxis")
-                        .font(.caption)
+                    HStack(spacing: 4) {
+                        Image(systemName: "chart.bar.xaxis")
+                            .font(.caption)
+                        Text("history.open".localized())
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
