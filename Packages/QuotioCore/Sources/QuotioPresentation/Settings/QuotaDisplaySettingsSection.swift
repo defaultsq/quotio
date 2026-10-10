@@ -23,6 +23,20 @@ struct QuotaDisplaySettingsSection: View {
         )
     }
 
+    @ViewBuilder private var historyStatus: some View {
+        if !history.availability.connected {
+            Label("history.offline".localized(), systemImage: "wifi.slash")
+        } else if !history.availability.canRead {
+            Label((history.error == .storage ? "history.storageFailed" : history.error == .unauthorized ? "history.ownerOnly" : "history.unsupported").localized(),
+                  systemImage: "exclamationmark.triangle")
+        } else if history.error != nil {
+            Label("history.settingsFailed".localized(), systemImage: "exclamationmark.triangle")
+        } else if let enabled = history.recordingEnabled {
+            Label((enabled ? "history.status.recording" : "history.status.paused").localized(),
+                  systemImage: enabled ? "record.circle" : "pause.circle")
+        }
+    }
+
     var body: some View {
         Section {
             Picker("settings.quota.displayMode".localized(), selection: displayModeBinding) {
@@ -37,24 +51,26 @@ struct QuotaDisplaySettingsSection: View {
                 }
             }
             .pickerStyle(.segmented)
-            Divider()
-            Toggle("history.recording".localized(), isOn: Binding(
-                get: { history.recordingEnabled ?? false },
-                set: { enabled in Task { await history.setRecording(enabled) } }
-            ))
-            .disabled(!history.availability.connected || !history.availability.canWrite || history.recordingEnabled == nil || history.isWorking)
-            Text("history.settingsHelp".localized()).font(.caption).foregroundStyle(.secondary)
-            Button("history.clearAll".localized(), role: .destructive) { confirmsClearAll = true }
-                .disabled(!history.availability.connected || !history.availability.canWrite || history.isWorking)
-            if !history.availability.connected {
-                Text("history.offline".localized()).font(.caption).foregroundStyle(.secondary)
-            } else if !history.availability.canRead {
-                Text((history.error == .storage ? "history.storageFailed" : history.error == .unauthorized ? "history.ownerOnly" : "history.unsupported").localized()).font(.caption).foregroundStyle(.secondary)
-            }
-            if history.error != nil && history.availability.canRead {
-                HStack {
-                    Text("history.settingsFailed".localized()).font(.caption).foregroundStyle(.secondary)
-                    Button("action.retry".localized()) { Task { await history.loadSettings() } }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("history.title".localized()).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("history.recording".localized(), isOn: Binding(
+                        get: { history.recordingEnabled ?? false },
+                        set: { enabled in Task { await history.setRecording(enabled) } }
+                    ))
+                    .disabled(!history.availability.connected || !history.availability.canWrite || history.recordingEnabled == nil || history.isWorking)
+                    Text("history.settingsHelp".localized()).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    historyStatus.font(.caption).foregroundStyle(.secondary)
+                    if history.error != nil && history.availability.canRead {
+                        Button("action.retry".localized()) { Task { await history.loadSettings() } }.controlSize(.small)
+                    }
+                    Spacer(minLength: 8)
+                    if history.isWorking { ProgressView().controlSize(.small) }
+                    Button("history.clearAll".localized(), role: .destructive) { confirmsClearAll = true }
+                        .disabled(!history.availability.connected || !history.availability.canWrite || history.isWorking)
                 }
             }
         } header: {
