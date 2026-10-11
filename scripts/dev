@@ -81,6 +81,11 @@ case "${1:-help}" in
         ;;
     macos)
         shift
+        # Without a team the app is signed ad hoc and asks for keychain access on every launch.
+        [[ -f "$ROOT/apps/macos/Config/Local.xcconfig" ]] || {
+            echo "error: copy apps/macos/Config/Local.xcconfig.example to Local.xcconfig and set DEVELOPMENT_TEAM" >&2
+            exit 2
+        }
         exec "$ROOT/apps/macos/scripts/build_and_run.sh" "$@"
         ;;
     ios-sim)
