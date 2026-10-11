@@ -64,6 +64,15 @@ public struct QuotaPace: Equatable, Sendable {
     }
 }
 
+public extension QuotaPace {
+    var windowDuration: TimeInterval { resetsAt.timeIntervalSince(windowStart) }
+
+    /// What would be left at the reset if the average rate holds.
+    func remainingAtReset(now: Date) -> Double {
+        max(0, remaining - usedPerDay * resetsAt.timeIntervalSince(now) / 86_400)
+    }
+}
+
 public extension QuotaMetric {
     var resetDate: Date? {
         guard !resetTime.isEmpty else { return nil }

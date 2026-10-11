@@ -9,6 +9,7 @@ enum StatusBarCommand: Equatable {
     case selectProvider(QuotaProvider?)
     case pairIPhone
     case openApp
+    case openHistory(QuotaAccountID)
     case quit
 }
 
@@ -22,6 +23,8 @@ public struct StatusBarCommandHandlers {
     fileprivate let openApp: () -> Void
     fileprivate let quit: () -> Void
     fileprivate let menuNeedsRebuild: () -> Void
+    fileprivate let openHistory: (QuotaAccountID) -> Void
+    fileprivate let loadHistory: @MainActor @Sendable (QuotaAccountID, String, QuotaHistoryRange) async -> QuotaHistoryChart?
 
     public init(
         refreshAll: @escaping @MainActor @Sendable () async -> Void,
@@ -31,7 +34,9 @@ public struct StatusBarCommandHandlers {
         pairIPhone: @escaping () -> Void,
         openApp: @escaping () -> Void,
         quit: @escaping () -> Void,
-        menuNeedsRebuild: @escaping () -> Void
+        menuNeedsRebuild: @escaping () -> Void,
+        openHistory: @escaping (QuotaAccountID) -> Void = { _ in },
+        loadHistory: @escaping @MainActor @Sendable (QuotaAccountID, String, QuotaHistoryRange) async -> QuotaHistoryChart? = { _, _, _ in nil }
     ) {
         self.refreshAll = refreshAll
         self.refreshProvider = refreshProvider
@@ -41,6 +46,8 @@ public struct StatusBarCommandHandlers {
         self.openApp = openApp
         self.quit = quit
         self.menuNeedsRebuild = menuNeedsRebuild
+        self.openHistory = openHistory
+        self.loadHistory = loadHistory
     }
 }
 
@@ -67,10 +74,21 @@ public final class StatusBarCommandDispatcher {
             handlers.pairIPhone()
         case .openApp:
             handlers.openApp()
+        case .openHistory(let account):
+            handlers.openHistory(account)
         case .quit:
             handlers.quit()
         }
         return nil
+    }
+
+    /// Recorded remaining values for one limit, oldest first. History is a
+    /// nicety here, so any failure reads as none.
+    func history(account: QuotaAccountID, metricID: String, range: QuotaHistoryRange) async -> [QuotaHistoryPoint] {
+        guard let chart = await handlers.loadHistory(account, metricID, range) else { return [] }
+        return chart.bins.compactMap { bin in
+            bin.latest.remainingPercent.map { QuotaHistoryPoint(date: bin.lastObservedAt, remaining: $0) }
+        }
     }
 
     private func perform(_ action: @escaping @MainActor @Sendable () async -> Void) -> Task<Void, Never> {

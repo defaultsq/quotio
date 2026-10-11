@@ -262,9 +262,7 @@ final class StatusBarMenuRenderer {
             ? "privacy.accountHidden".localized()
             : account.email
 
-        if provider == .codex, let analytics = account.quota.analytics, !analytics.isEmpty {
-            item.submenu = buildCodexAnalyticsSubmenu(analytics: analytics, accountID: account.id)
-        }
+        item.submenu = buildAccountDetailSubmenu(account)
 
         let hasDetail = item.submenu != nil
         let itemID = ObjectIdentifier(item)
@@ -289,6 +287,39 @@ final class StatusBarMenuRenderer {
         }
         item.view = hostingView(for: cardView)
         return item
+    }
+
+    /// Charts every limit beside the menu instead of inside it, so the menu
+    /// stays short on small screens.
+    private func buildAccountDetailSubmenu(_ account: StatusBarMenuAccountSnapshot) -> NSMenu? {
+        guard !account.quota.isForbidden, account.quota.models.contains(where: { !$0.isStandaloneMetric }) else {
+            return nil
+        }
+        let submenu = makeMenu()
+        submenu.addItem(viewItem(for: MenuContent {
+            let current = self.snapshot.providers.first { $0.provider == account.id.provider }?
+                .accounts.first { $0.id == account.id } ?? account
+            return MenuAccountDetailView(
+                email: current.email,
+                data: current.quota,
+                provider: account.id.provider,
+                settings: self.snapshot.displaySettings,
+                loadHistory: { metricID, range in
+                    await self.commands.history(account: account.id, metricID: metricID, range: range)
+                }
+            )
+        }, width: 380))
+        if account.id.provider == .codex, let analytics = account.quota.analytics, !analytics.isEmpty {
+            submenu.addItem(.separator())
+            let analyticsItem = NSMenuItem(title: "quota.detail.analytics".localized(), action: nil, keyEquivalent: "")
+            analyticsItem.image = NSImage(systemSymbolName: "chart.bar.xaxis", accessibilityDescription: nil)
+            analyticsItem.submenu = buildCodexAnalyticsSubmenu(analytics: analytics, accountID: account.id)
+            submenu.addItem(analyticsItem)
+        }
+        submenu.addItem(.separator())
+        submenu.addItem(commandItem("quota.detail.openHistory", symbol: "clock.arrow.circlepath", key: "",
+                                    command: .openHistory(account.id)))
+        return submenu
     }
 
     private func buildCodexAnalyticsSubmenu(analytics: QuotaAnalytics, accountID: QuotaAccountID) -> NSMenu {
@@ -621,8 +652,7 @@ private struct MenuAccountCardView: View {
     private var quotaContentSection: some View {
         let groups = data.metricGroups
         let standaloneModels = data.models.filter(\.isStandaloneMetric)
-        let meters = groups.flatMap(\.models).map { QuotaMeter(metric: $0, displayMode: settings.quotaDisplayMode) }
-        let burnID = settings.quotaDisplayStyle == .detailed ? Self.burnMetricID(meters) : nil
+        let isDetailed = settings.quotaDisplayStyle == .detailed
 
         return VStack(spacing: 10) {
             if data.isForbidden {
@@ -647,10 +677,8 @@ private struct MenuAccountCardView: View {
                     let meter = QuotaMeter(metric: metric, displayMode: settings.quotaDisplayMode)
                     if meter.isExhausted {
                         QuotaExhaustedBanner(meter: meter)
-                    } else if metric.id == burnID, let pace = meter.pace {
-                        QuotaBurnCard(meter: meter, pace: pace)
                     } else {
-                        QuotaLimitRow(meter: meter)
+                        QuotaLimitRow(meter: meter, showsInsight: isDetailed)
                     }
                 }
             }
@@ -669,13 +697,67 @@ private struct MenuAccountCardView: View {
             }
         }
     }
+}
 
-    /// Detailed charts the paced limit with the longest window, which is the
-    /// one whose trend says most about the days ahead.
-    private static func burnMetricID(_ meters: [QuotaMeter]) -> String? {
-        meters.filter { $0.pace != nil && !$0.isExhausted }
-            .max { ($0.metric.windowDuration ?? 0) < ($1.metric.windowDuration ?? 0) }?
-            .metric.id
+/// The account's submenu: a chart for each paced limit, drawn from recorded
+/// history when there is some, and a plain row for limits without a window.
+private struct MenuAccountDetailView: View {
+    let email: String
+    let data: ProviderQuota
+    let provider: QuotaProvider
+    let settings: StatusBarMenuDisplaySettings
+    let loadHistory: @MainActor (String, QuotaHistoryRange) async -> [QuotaHistoryPoint]
+    @State private var history: [String: [QuotaHistoryPoint]] = [:]
+
+    private var meters: [QuotaMeter] {
+        data.metricGroups.flatMap(\.models).map { QuotaMeter(metric: $0, displayMode: settings.quotaDisplayMode) }
+    }
+
+    var body: some View {
+        let meters = meters
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                ProviderIconMono(provider: provider, size: 14)
+                    .foregroundStyle(.secondary)
+                SensitiveAccountText(value: email, isSensitive: settings.hideSensitiveInfo)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                Text(String(format: "quota.detail.updated".localized(),
+                            data.lastUpdated.formatted(.relative(presentation: .named))))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            ForEach(meters, id: \.metric.id) { meter in
+                if meter.isExhausted {
+                    QuotaExhaustedBanner(meter: meter)
+                } else if let pace = meter.pace {
+                    QuotaBurnCard(meter: meter, pace: pace, history: history[meter.metric.id] ?? [])
+                } else {
+                    QuotaLimitRow(meter: meter)
+                }
+            }
+            if meters.contains(where: { $0.pace != nil && !$0.isExhausted }) {
+                QuotaBurnLegend()
+            }
+        }
+        .padding(.horizontal, MenuItemMetrics.contentInset)
+        .padding(.vertical, 10)
+        .task {
+            for meter in meters where !meter.isExhausted {
+                guard let pace = meter.pace else { continue }
+                history[meter.metric.id] = await loadHistory(meter.metric.id, Self.range(for: pace.windowDuration))
+            }
+        }
+    }
+
+    /// The shortest history range that covers the whole window.
+    private static func range(for window: TimeInterval) -> QuotaHistoryRange {
+        if window <= 86_400 { return .day }
+        if window <= 7 * 86_400 { return .week }
+        return .month
     }
 }
 
@@ -711,7 +793,7 @@ private struct MenuCompactAccountRow: View {
                 MenuSignInAgainLabel()
             } else if let binding {
                 VStack(spacing: 3) {
-                    ForEach(meters.prefix(2), id: \.metric.id) { meter in
+                    ForEach(Self.barMeters(meters), id: \.metric.id) { meter in
                         QuotaPaceBar(meter: meter, height: 4, tickOverhang: 2)
                     }
                 }
@@ -751,6 +833,13 @@ private struct MenuCompactAccountRow: View {
             Text(Self.shortName(meter) + " · " + when)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// The two tightest limits in their original order, so the bars always
+    /// include the one whose value the row shows.
+    private static func barMeters(_ meters: [QuotaMeter]) -> [QuotaMeter] {
+        let tightest = Set(meters.sorted { $0.remaining < $1.remaining }.prefix(2).map(\.metric.id))
+        return meters.filter { tightest.contains($0.metric.id) }
     }
 
     private static func shortName(_ meter: QuotaMeter) -> String {

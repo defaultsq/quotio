@@ -109,6 +109,8 @@ struct AccountsSettingsScreen: View {
             Text(String(format: "settings.replacePinnedAccountMessage".localized(), pinTitle(replacement)))
         }
         .onChange(of: quota.state.hostID) { _, _ in model.pendingPin = nil }
+        .onChange(of: navigation.requestedHistory, initial: true) { _, _ in openRequestedHistory() }
+        .onChange(of: accounts.accounts.count) { _, _ in openRequestedHistory() }
         .alert("settings.renameAccount".localized(), isPresented: Binding(
             get: { model.renamingAccount != nil }, set: { if !$0 { model.renamingAccount = nil } }
         )) {
@@ -190,6 +192,18 @@ struct AccountsSettingsScreen: View {
             .disabled(connectable.isEmpty)
             .help("action.addAccount".localized())
         }
+    }
+
+    /// Opens history asked for from outside this screen, such as the menu bar,
+    /// once the account it names has loaded.
+    private func openRequestedHistory() {
+        guard let request = navigation.requestedHistory,
+              let account = accounts.accounts.first(where: {
+                  $0.providerID.rawValue == request.provider.rawValue && $0.accountKey == request.accountKey
+              }) else { return }
+        navigation.requestedHistory = nil
+        model.sheet = .history(request.provider, account,
+                               history.makeScreen(accountID: account.accountKey, provider: request.provider))
     }
 
     private func pinTitle(_ item: MenuBarQuotaItem) -> String {

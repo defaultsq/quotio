@@ -396,6 +396,14 @@ private final class ProductionAppRuntimeServices: AppRuntimeServices {
                 },
                 menuNeedsRebuild: { [weak statusBarManager] in
                     statusBarManager?.rebuildMenuInPlace()
+                },
+                openHistory: { [weak statusBarManager, windowPresenter, navigationScreenModel] account in
+                    statusBarManager?.closeMenu()
+                    navigationScreenModel.showHistory(account)
+                    windowPresenter.showMainWindow()
+                },
+                loadHistory: { [quotioBackend] account, metricID, range in
+                    try? await quotioBackend.historyChart(accountID: account.accountKey, metricID: metricID, range: range)
                 }
             )
         )

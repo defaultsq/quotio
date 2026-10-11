@@ -99,6 +99,15 @@ enum QuotaTimeText {
         return String(format: "quota.reset.at".localized(), weekdayTime(date))
     }
 
+    /// "5 hours", "7 days".
+    static func window(_ duration: TimeInterval) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = duration >= 86_400 ? [.day] : [.hour, .minute]
+        formatter.unitsStyle = .full
+        formatter.maximumUnitCount = 1
+        return formatter.string(from: duration) ?? ""
+    }
+
     static func percent(_ value: Double) -> String {
         "\(max(1, Int(value.rounded())))%"
     }
@@ -130,10 +139,13 @@ struct QuotaPaceBar: View {
                     .fill(meter.color)
                     .frame(width: fill)
                 if !meter.isExhausted, let tick = meter.tickFraction {
+                    // A background-colored edge keeps the tick readable over a light fill in dark mode.
                     Rectangle()
                         .fill(.primary)
                         .frame(width: 2, height: height + tickOverhang * 2)
-                        .offset(x: min(width - 2, max(0, width * tick - 1)))
+                        .padding(.horizontal, 1)
+                        .background(.background)
+                        .offset(x: min(width - 4, max(0, width * tick - 2)))
                 }
             }
             .frame(height: height)
@@ -144,11 +156,41 @@ struct QuotaPaceBar: View {
     }
 }
 
+// MARK: - Rates
+
+/// Phrases a pace's rates in the unit that suits its window: hours inside a
+/// window shorter than a day, days otherwise.
+@MainActor
+struct QuotaRateText {
+    let hourly: Bool
+
+    init(_ pace: QuotaPace) {
+        hourly = pace.windowDuration < 86_400
+    }
+
+    /// "~9% an hour", "~34% a day".
+    func rate(perDay: Double) -> String {
+        String(format: (hourly ? "quota.rate.hour" : "quota.rate.day").localized(),
+               QuotaTimeText.percent(hourly ? perDay / 24 : perDay))
+    }
+
+    func resetTime(_ pace: QuotaPace) -> String {
+        hourly ? QuotaTimeText.time(pace.resetsAt) : QuotaTimeText.weekdayTime(pace.resetsAt)
+    }
+}
+
 // MARK: - Rows
 
 /// Comfortable density: name and value, the pace bar, then reset or projection.
+/// Detailed adds a one-line reading of the rate.
 struct QuotaLimitRow: View {
     let meter: QuotaMeter
+    var showsInsight = false
+
+    private var insightPace: QuotaPace? {
+        guard showsInsight, let pace = meter.pace, pace.usedPerDay > 0 else { return nil }
+        return pace
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -165,6 +207,18 @@ struct QuotaLimitRow: View {
             QuotaPaceBar(meter: meter)
             footer
                 .font(.caption)
+            if let pace = insightPace, meter.tone == .behind {
+                Label {
+                    Text(String(format: "quota.insight.behind".localized(),
+                                QuotaRateText(pace).rate(perDay: pace.usedPerDay),
+                                QuotaRateText(pace).rate(perDay: pace.budgetPerDay)))
+                } icon: {
+                    Image(systemName: "gauge.with.dots.needle.67percent")
+                }
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .lineLimit(1)
+            }
         }
         .menuNativeTooltip(meter.metric.tooltip ?? "")
     }
@@ -183,9 +237,23 @@ struct QuotaLimitRow: View {
                 }
             }
         } else if let reset = meter.resetsAt, reset > Date() {
-            Text(QuotaTimeText.reset(reset))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            HStack(spacing: 8) {
+                Text(QuotaTimeText.reset(reset))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if let pace = insightPace {
+                    Spacer(minLength: 4)
+                    Label {
+                        Text(String(format: "quota.insight.onPace".localized(),
+                                    QuotaRateText(pace).rate(perDay: pace.usedPerDay)))
+                    } icon: {
+                        Image(systemName: "gauge.with.dots.needle.33percent")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+            }
         } else {
             // Keeps every row the same height whether or not a reset is known.
             Text(" ").accessibilityHidden(true)
@@ -227,27 +295,35 @@ struct QuotaExhaustedBanner: View {
     }
 }
 
-// MARK: - Detailed
+// MARK: - Burn chart
 
-/// Detailed density: the window so far, the even-pace line, where the current
-/// rate leads, and a daily budget that would last until the reset.
+/// One recorded remaining value.
+struct QuotaHistoryPoint: Equatable, Sendable {
+    let date: Date
+    let remaining: Double
+}
+
+/// The window so far, the even-pace line, where the current rate leads, and
+/// what to do about it.
 struct QuotaBurnCard: View {
     let meter: QuotaMeter
     let pace: QuotaPace
+    var history: [QuotaHistoryPoint] = []
 
     private var isBehind: Bool { meter.tone == .behind }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text(meter.name)
+                Text(meter.name + " · " + QuotaTimeText.window(pace.windowDuration))
                     .font(.callout.weight(.medium))
+                    .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(meter.valueText)
                     .font(.callout.weight(.semibold).monospacedDigit())
                     .foregroundStyle(meter.valueColor)
             }
-            QuotaBurnChart(meter: meter, pace: pace)
+            QuotaBurnChart(meter: meter, pace: pace, history: history)
             Divider().opacity(0.6)
             advice
                 .font(.caption)
@@ -271,24 +347,24 @@ struct QuotaBurnCard: View {
     }
 
     private var adviceText: Text {
-        let estimated = Text(" " + "quota.pace.estimated".localized()).foregroundStyle(.tertiary)
         guard pace.usedPerDay > 0 else {
-            return Text("quota.pace.noRate".localized()).foregroundStyle(.secondary) + estimated
+            return Text("quota.pace.noRate".localized()).foregroundStyle(.secondary)
         }
-        let rate = Text(String(format: "quota.pace.rate".localized(), QuotaTimeText.percent(pace.usedPerDay)))
+        let rates = QuotaRateText(pace)
+        let rate = Text(rates.rate(perDay: pace.usedPerDay) + ".")
             .fontWeight(.semibold)
             .foregroundStyle(isBehind ? .orange : .primary)
         let plan = isBehind
-            ? String(format: "quota.pace.budget".localized(), QuotaTimeText.weekdayTime(pace.resetsAt),
-                     QuotaTimeText.percent(pace.budgetPerDay))
-            : "quota.pace.onTrack".localized()
-        return rate + Text(" " + plan).foregroundStyle(.secondary) + estimated
+            ? String(format: "quota.advice.budget".localized(), rates.resetTime(pace), rates.rate(perDay: pace.budgetPerDay))
+            : String(format: "quota.advice.leftAtReset".localized(), QuotaTimeText.percent(pace.remainingAtReset(now: Date())))
+        return rate + Text(" " + plan).foregroundStyle(.secondary)
     }
 }
 
 private struct QuotaBurnChart: View {
     let meter: QuotaMeter
     let pace: QuotaPace
+    let history: [QuotaHistoryPoint]
     private let plotHeight: CGFloat = 56
 
     private var isBehind: Bool { meter.tone == .behind }
@@ -298,32 +374,31 @@ private struct QuotaBurnChart: View {
         VStack(spacing: 4) {
             GeometryReader { proxy in
                 let size = proxy.size
-                let x = { (date: Date) in xPosition(date, width: size.width) }
-                let y = { (remaining: Double) in size.height * (1 - remaining / 100) }
-                let current = CGPoint(x: x(now), y: y(pace.remaining))
-                let start = CGPoint(x: 0, y: y(100))
+                let point = { (date: Date, remaining: Double) in
+                    CGPoint(x: xPosition(date, width: size.width), y: size.height * (1 - remaining / 100))
+                }
+                let current = point(now, pace.remaining)
+                let recorded = recordedPoints(now: now).map { point($0.date, $0.remaining) } + [current]
                 let end = projectionEnd(now: now, size: size)
 
                 Path { path in
-                    path.move(to: start)
-                    path.addLine(to: current)
+                    path.move(to: CGPoint(x: recorded[0].x, y: size.height))
+                    recorded.forEach { path.addLine(to: $0) }
                     path.addLine(to: CGPoint(x: current.x, y: size.height))
-                    path.addLine(to: CGPoint(x: 0, y: size.height))
                     path.closeSubpath()
                 }
                 .fill(meter.color.opacity(0.15))
 
                 Path { path in
-                    path.move(to: start)
+                    path.move(to: CGPoint(x: 0, y: 0))
                     path.addLine(to: CGPoint(x: size.width, y: size.height))
                 }
                 .stroke(.secondary, style: StrokeStyle(lineWidth: 1, dash: [1, 3]))
 
                 Path { path in
-                    path.move(to: start)
-                    path.addLine(to: current)
+                    path.addLines(recorded)
                 }
-                .stroke(meter.color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .stroke(meter.color, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
                 Path { path in
                     path.move(to: current)
@@ -354,15 +429,22 @@ private struct QuotaBurnChart: View {
         .accessibilityLabel(meter.name + " " + meter.valueText)
     }
 
+    /// Recorded values since the window opened. Without any, the line assumes
+    /// an even spend from a full window to now.
+    private func recordedPoints(now: Date) -> [QuotaHistoryPoint] {
+        let inWindow = history
+            .filter { $0.date >= pace.windowStart && $0.date < now }
+            .sorted { $0.date < $1.date }
+        return inWindow.isEmpty ? [QuotaHistoryPoint(date: pace.windowStart, remaining: 100)] : inWindow
+    }
+
     /// Weekdays repeat inside a short window, so those read as clock times.
     private func axisText(_ date: Date) -> String {
-        pace.resetsAt.timeIntervalSince(pace.windowStart) >= 2 * 86_400
-            ? QuotaTimeText.weekday(date) : QuotaTimeText.time(date)
+        pace.windowDuration >= 2 * 86_400 ? QuotaTimeText.weekday(date) : QuotaTimeText.time(date)
     }
 
     private func xPosition(_ date: Date, width: CGFloat) -> CGFloat {
-        let span = pace.resetsAt.timeIntervalSince(pace.windowStart)
-        let fraction = date.timeIntervalSince(pace.windowStart) / span
+        let fraction = date.timeIntervalSince(pace.windowStart) / pace.windowDuration
         return width * min(1, max(0, fraction))
     }
 
@@ -370,9 +452,7 @@ private struct QuotaBurnChart: View {
         if let empty = pace.projectedEmpty {
             return CGPoint(x: xPosition(empty, width: size.width), y: size.height)
         }
-        let daysLeft = pace.resetsAt.timeIntervalSince(now) / 86_400
-        let left = max(0, pace.remaining - pace.usedPerDay * daysLeft)
-        return CGPoint(x: size.width, y: size.height * (1 - left / 100))
+        return CGPoint(x: size.width, y: size.height * (1 - pace.remainingAtReset(now: now) / 100))
     }
 
     /// Start and reset labels pin to the edges; "Now" and the projected empty
@@ -390,13 +470,13 @@ private struct QuotaBurnChart: View {
                 reset
                     .foregroundStyle(.blue)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                if nowX > 40, nowX < width - 90, !isBehind || emptyX.map({ abs($0 - nowX) > 40 }) ?? true {
+                if nowX > 40, nowX < width - 75, !isBehind || emptyX.map({ abs($0 - nowX) > 40 }) ?? true {
                     Text("quota.chart.now".localized())
                         .foregroundStyle(.primary)
                         .fixedSize()
                         .position(x: nowX, y: 6)
                 }
-                if isBehind, let empty = pace.projectedEmpty, let emptyX, emptyX > 40, emptyX < width - 90 {
+                if isBehind, let empty = pace.projectedEmpty, let emptyX, emptyX > 40, emptyX < width - 75 {
                     Text(axisText(empty))
                         .fontWeight(.semibold)
                         .foregroundStyle(.red)
@@ -407,5 +487,34 @@ private struct QuotaBurnChart: View {
         }
         .font(.caption2)
         .frame(height: 12)
+    }
+}
+
+/// Explains the chart's three lines once for every card above it.
+struct QuotaBurnLegend: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            legend("quota.legend.recorded", style: StrokeStyle(lineWidth: 2), color: .green)
+            legend("quota.legend.even", style: StrokeStyle(lineWidth: 1, dash: [1, 3]), color: .secondary)
+            legend("quota.legend.projection", style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]), color: .green)
+            Spacer(minLength: 4)
+            Text("quota.pace.estimated".localized())
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
+
+    private func legend(_ key: String, style: StrokeStyle, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: 1))
+                path.addLine(to: CGPoint(x: 12, y: 1))
+            }
+            .stroke(color, style: style)
+            .frame(width: 12, height: 2)
+            Text(key.localized())
+                .lineLimit(1)
+                .fixedSize()
+        }
     }
 }
