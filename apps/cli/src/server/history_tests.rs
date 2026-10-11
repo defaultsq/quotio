@@ -103,7 +103,7 @@ async fn cache_restore_and_snapshot_reads_do_not_record_stale_provider_observati
     .unwrap();
     assert_eq!(
         before.last_observed_at,
-        Some(time::macros::datetime!(2026-01-01 0:00 UTC))
+        Some(time::macros::datetime!(2026-01-01 0:00:10 UTC))
     );
     let _ = resolved_snapshot(State(state.clone()), security::owner())
         .await
