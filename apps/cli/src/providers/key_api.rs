@@ -108,6 +108,7 @@ fn window(
         .unwrap_or(Quota::Unknown);
     QuotaWindow {
         window_seconds: None,
+        reset_precision: None,
         note: None,
         metric_id: None,
         label: label.into(),

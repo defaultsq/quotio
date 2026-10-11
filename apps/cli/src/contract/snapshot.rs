@@ -347,6 +347,7 @@ fn observation(
                 window_seconds: window
                     .window_seconds
                     .or_else(|| labeled_window_seconds(&window.label, window.resets_at)),
+                reset_precision: window.reset_precision,
                 fetched_at: window.fetched_at,
                 provenance: window.provenance.clone(),
             }
@@ -377,6 +378,7 @@ fn observation(
                     resets_at: None,
                     reset_description: None,
                     window_seconds: None,
+                    reset_precision: None,
                     fetched_at: weekly.fetched_at,
                     provenance: Provenance {
                         source: "antigravity_weekly_limit".into(),

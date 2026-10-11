@@ -307,7 +307,8 @@ struct QuotioHostPresentationMapper {
                 .compactMap { $0 }
                 .joined(separator: "\n"),
             group: window.group,
-            windowDuration: window.windowSeconds
+            windowDuration: window.windowSeconds,
+            resetPrecision: window.resetPrecision.flatMap(QuotaResetPrecision.init(rawValue:))
         )
     }
 

@@ -3583,6 +3583,13 @@
             "minimum": 1,
             "description": "Length of one quota period in seconds, when the source states it or the label names it."
           },
+          "reset_precision": {
+            "type": "string",
+            "enum": [
+              "day"
+            ],
+            "description": "Set when resets_at is only known to this precision; absent means resets_at is exact."
+          },
           "reset_description": {
             "type": [
               "string",
@@ -5474,6 +5481,13 @@
             "type": "integer",
             "minimum": 1,
             "description": "Length of one quota period in seconds, when the source states it or the label names it."
+          },
+          "reset_precision": {
+            "type": "string",
+            "enum": [
+              "day"
+            ],
+            "description": "Set when resets_at is only known to this precision; absent means resets_at is exact."
           },
           "reset_description": {
             "anyOf": [

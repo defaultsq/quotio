@@ -1,6 +1,6 @@
 //! Version 2 transport types. These contain public metadata only, never credentials.
 //! v1 serializers remain separate while clients migrate to the resolved host model.
-use crate::domain::{AccountOrigin, Consumption, Provenance, Quota, QuotaAmounts};
+use crate::domain::{AccountOrigin, Consumption, Provenance, Quota, QuotaAmounts, ResetPrecision};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use time::OffsetDateTime;
@@ -134,6 +134,8 @@ pub struct Metric {
     pub reset_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_precision: Option<ResetPrecision>,
     #[serde(with = "time::serde::rfc3339")]
     pub fetched_at: OffsetDateTime,
     pub provenance: Provenance,

@@ -23,6 +23,8 @@ struct QuotaMeter {
     var remaining: Double { max(0, min(100, metric.percentage)) }
     var isExhausted: Bool { hasData && remaining <= 0 }
     var resetsAt: Date? { metric.resetDate }
+    /// The source names the reset day only, so clock times and countdowns would overstate it.
+    var resetsOnDate: Bool { metric.resetPrecision == .day }
 
     var displayValue: Double { displayMode.displayValue(from: remaining) }
     var valueText: String { hasData ? "\(Int(displayValue.rounded()))%" : "—" }
@@ -90,9 +92,20 @@ enum QuotaTimeText {
         date.formatted(.dateTime.hour().minute())
     }
 
+    /// A day-precision reset sits at midnight UTC; reading it in UTC keeps the
+    /// named day from shifting to the day before west of Greenwich.
+    static func day(_ date: Date) -> String {
+        var style = Date.FormatStyle.dateTime.month(.abbreviated).day()
+        style.timeZone = .gmt
+        return date.formatted(style)
+    }
+
     /// Within a day the countdown reads better than a clock time.
     @MainActor
-    static func reset(_ date: Date, now: Date = Date()) -> String {
+    static func reset(_ date: Date, onDate: Bool = false, now: Date = Date()) -> String {
+        if onDate {
+            return String(format: "quota.reset.at".localized(), day(date))
+        }
         if date.timeIntervalSince(now) < 86_400 {
             return String(format: "quota.reset.in".localized(), duration(until: date, now: now))
         }
@@ -174,8 +187,9 @@ struct QuotaRateText {
                QuotaTimeText.percent(hourly ? perDay / 24 : perDay))
     }
 
-    func resetTime(_ pace: QuotaPace) -> String {
-        hourly ? QuotaTimeText.time(pace.resetsAt) : QuotaTimeText.weekdayTime(pace.resetsAt)
+    func resetTime(_ pace: QuotaPace, onDate: Bool) -> String {
+        if onDate { return QuotaTimeText.day(pace.resetsAt) }
+        return hourly ? QuotaTimeText.time(pace.resetsAt) : QuotaTimeText.weekdayTime(pace.resetsAt)
     }
 }
 
@@ -231,14 +245,14 @@ struct QuotaLimitRow: View {
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let reset = meter.resetsAt {
-                    Text(QuotaTimeText.reset(reset))
+                    Text(QuotaTimeText.reset(reset, onDate: meter.resetsOnDate))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
         } else if let reset = meter.resetsAt, reset > Date() {
             HStack(spacing: 8) {
-                Text(QuotaTimeText.reset(reset))
+                Text(QuotaTimeText.reset(reset, onDate: meter.resetsOnDate))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if let pace = insightPace {
@@ -275,13 +289,15 @@ struct QuotaExhaustedBanner: View {
                     .foregroundStyle(.red)
                     .lineLimit(1)
                 if let reset = meter.resetsAt {
-                    Text(String(format: "quota.exhausted.back".localized(), QuotaTimeText.time(reset)))
+                    Text(meter.resetsOnDate
+                        ? String(format: "quota.exhausted.backOn".localized(), QuotaTimeText.day(reset))
+                        : String(format: "quota.exhausted.back".localized(), QuotaTimeText.time(reset)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             Spacer(minLength: 8)
-            if let reset = meter.resetsAt, reset > Date() {
+            if !meter.resetsOnDate, let reset = meter.resetsAt, reset > Date() {
                 Label(QuotaTimeText.duration(until: reset), systemImage: "clock")
                     .font(.callout.weight(.semibold).monospacedDigit())
                     .foregroundStyle(.primary)
@@ -355,7 +371,7 @@ struct QuotaBurnCard: View {
             .fontWeight(.semibold)
             .foregroundStyle(isBehind ? .orange : .primary)
         let plan = isBehind
-            ? String(format: "quota.advice.budget".localized(), rates.resetTime(pace), rates.rate(perDay: pace.budgetPerDay))
+            ? String(format: "quota.advice.budget".localized(), rates.resetTime(pace, onDate: meter.resetsOnDate), rates.rate(perDay: pace.budgetPerDay))
             : String(format: "quota.advice.leftAtReset".localized(), QuotaTimeText.percent(pace.remainingAtReset(now: Date())))
         return rate + Text(" " + plan).foregroundStyle(.secondary)
     }
@@ -443,6 +459,11 @@ private struct QuotaBurnChart: View {
         pace.windowDuration >= 2 * 86_400 ? QuotaTimeText.weekday(date) : QuotaTimeText.time(date)
     }
 
+    /// The window's edges are only known to the day when the reset is.
+    private func edgeText(_ date: Date) -> String {
+        meter.resetsOnDate ? QuotaTimeText.day(date) : axisText(date)
+    }
+
     private func xPosition(_ date: Date, width: CGFloat) -> CGFloat {
         let fraction = date.timeIntervalSince(pace.windowStart) / pace.windowDuration
         return width * min(1, max(0, fraction))
@@ -462,9 +483,9 @@ private struct QuotaBurnChart: View {
             let width = proxy.size.width
             let nowX = xPosition(now, width: width)
             let emptyX = pace.projectedEmpty.map { xPosition($0, width: width) }
-            let reset = Text(String(format: "quota.chart.reset".localized(), axisText(pace.resetsAt)))
+            let reset = Text(String(format: "quota.chart.reset".localized(), edgeText(pace.resetsAt)))
             ZStack(alignment: .topLeading) {
-                Text(axisText(pace.windowStart))
+                Text(edgeText(pace.windowStart))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 reset

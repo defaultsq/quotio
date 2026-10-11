@@ -150,9 +150,18 @@ pub struct QuotaWindow {
     /// How long one quota period lasts, when the source states it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_seconds: Option<u64>,
+    /// Set when `resets_at` is only known to this precision; absent means exact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_precision: Option<ResetPrecision>,
     pub provenance: Provenance,
     #[serde(with = "time::serde::rfc3339")]
     pub fetched_at: OffsetDateTime,
+}
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResetPrecision {
+    /// The source names the reset day but not the time of day or time zone.
+    Day,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

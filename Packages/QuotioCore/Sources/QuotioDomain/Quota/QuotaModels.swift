@@ -155,6 +155,12 @@ public enum QuotaMetricPresentation: Codable, Equatable, Sendable {
     case status(text: String)
 }
 
+/// How finely a metric's reset time is known, when not to the second.
+public enum QuotaResetPrecision: String, Codable, Equatable, Sendable {
+    /// The day is known; the time of day is midnight UTC by convention.
+    case day
+}
+
 public struct QuotaMetric: Codable, Equatable, Identifiable, Sendable {
     public let group: String?
     public let name: String
@@ -168,6 +174,8 @@ public struct QuotaMetric: Codable, Equatable, Identifiable, Sendable {
     public var tooltip: String?
     /// Length of one quota period, when known. Pace needs it to place the expected-remaining mark.
     public var windowDuration: TimeInterval?
+    /// Nil when `resetTime` is exact.
+    public var resetPrecision: QuotaResetPrecision?
 
     public var id: String { backendID ?? name }
     public var usedPercentage: Double { 100 - percentage }
@@ -183,7 +191,8 @@ public struct QuotaMetric: Codable, Equatable, Identifiable, Sendable {
         remaining: Int? = nil,
         tooltip: String? = nil,
         group: String? = nil,
-        windowDuration: TimeInterval? = nil
+        windowDuration: TimeInterval? = nil,
+        resetPrecision: QuotaResetPrecision? = nil
     ) {
         self.group = group
         self.name = name
@@ -196,6 +205,7 @@ public struct QuotaMetric: Codable, Equatable, Identifiable, Sendable {
         self.remaining = remaining
         self.tooltip = tooltip
         self.windowDuration = windowDuration
+        self.resetPrecision = resetPrecision
     }
 }
 

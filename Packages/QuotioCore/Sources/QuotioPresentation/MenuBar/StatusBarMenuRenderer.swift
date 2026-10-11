@@ -822,14 +822,16 @@ private struct MenuCompactAccountRow: View {
 
     @ViewBuilder private func detail(for meter: QuotaMeter) -> some View {
         if meter.isExhausted, let reset = meter.resetsAt, reset > Date() {
-            Text(String(format: "quota.countdown.in".localized(), QuotaTimeText.duration(until: reset)))
+            Text(meter.resetsOnDate
+                ? QuotaTimeText.day(reset)
+                : String(format: "quota.countdown.in".localized(), QuotaTimeText.duration(until: reset)))
                 .foregroundStyle(.secondary)
         } else if meter.tone == .behind, let empty = meter.pace?.projectedEmpty {
             Text(String(format: "quota.pace.emptyShort".localized(), QuotaTimeText.weekday(empty)))
                 .foregroundStyle(.orange)
         } else if let reset = meter.resetsAt, reset > Date() {
-            let when = reset.timeIntervalSinceNow < 86_400
-                ? QuotaTimeText.duration(until: reset) : QuotaTimeText.weekday(reset)
+            let when = meter.resetsOnDate ? QuotaTimeText.day(reset)
+                : reset.timeIntervalSinceNow < 86_400 ? QuotaTimeText.duration(until: reset) : QuotaTimeText.weekday(reset)
             Text(Self.shortName(meter) + " · " + when)
                 .foregroundStyle(.secondary)
         }

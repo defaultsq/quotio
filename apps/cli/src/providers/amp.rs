@@ -73,6 +73,7 @@ fn window(
     };
     QuotaWindow {
         window_seconds: None,
+        reset_precision: None,
         note: None,
         metric_id: Some(metric_id),
         consumption: amounts.as_ref().and_then(|a| {
@@ -154,6 +155,7 @@ fn apply_period(windows: &mut [QuotaWindow], period: Option<(OffsetDateTime, u64
     for window in windows {
         window.resets_at = Some(end);
         window.window_seconds = Some(length);
+        window.reset_precision = Some(ResetPrecision::Day);
     }
 }
 fn balance(input: &str, unit: &str) -> Result<QuotaAmounts, ProviderError> {
@@ -880,6 +882,7 @@ mod tests {
                     Some(time::macros::datetime!(2026-09-19 00:00 UTC))
                 );
                 assert_eq!(window.window_seconds, Some(31 * 24 * 60 * 60));
+                assert_eq!(window.reset_precision, Some(ResetPrecision::Day));
             }
             assert!(usage.windows[0].resets_at.is_none());
             assert!(
@@ -889,6 +892,7 @@ mod tests {
             );
             let value = serde_json::to_value(&usage).unwrap();
             assert_eq!(value["windows"][1]["resets_at"], "2026-09-19T00:00:00Z");
+            assert_eq!(value["windows"][1]["reset_precision"], "day");
             assert_eq!(
                 value["windows"][1]["reset_description"],
                 "upon renewal in 13 days"

@@ -162,6 +162,7 @@ pub(super) fn window(
     };
     Ok(QuotaWindow {
         window_seconds: None,
+        reset_precision: None,
         note: None,
         metric_id: None,
         consumption: None,

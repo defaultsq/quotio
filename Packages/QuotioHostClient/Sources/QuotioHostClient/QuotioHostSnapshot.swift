@@ -79,6 +79,7 @@ public struct QuotioHostSnapshot: Decodable, Sendable {
         public let resetsAt: Date?
         public let resetDescription: String?
         public let windowSeconds: Double?
+        public let resetPrecision: String?
         public let fetchedAt: Date
     }
     public struct Summary: Decodable, Sendable {

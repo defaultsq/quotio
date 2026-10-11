@@ -282,6 +282,7 @@ mod tests {
                 },
                 windows: vec![crate::domain::QuotaWindow {
                     window_seconds: None,
+                    reset_precision: None,
                     note: None,
                     metric_id: None,
                     consumption: None,

@@ -454,6 +454,7 @@ fn parse_windows(
     if response.uses_token_rate_limits_billing == Some(false) {
         return Ok(vec![QuotaWindow {
             window_seconds: None,
+            reset_precision: None,
             note: Some("legacy-billing".into()),
             metric_id: Some("factory-billing-mode".into()),
             consumption: None,
@@ -513,6 +514,7 @@ fn parse_windows(
             };
             windows.push(QuotaWindow {
                 window_seconds: None,
+                reset_precision: None,
                 note: None,
                 metric_id: Some(format!("factory-{id}-{period}")),
                 consumption: None,
@@ -535,6 +537,7 @@ fn parse_windows(
         }
         windows.push(QuotaWindow {
             window_seconds: None,
+            reset_precision: None,
             note: None,
             metric_id: Some("factory-extra-balance".into()),
             consumption: None,
