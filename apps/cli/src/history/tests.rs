@@ -757,3 +757,70 @@ async fn recording_error_survives_empty_or_rejected_batches_until_fresh_success(
     drop(h);
     std::fs::remove_dir_all(dir).unwrap();
 }
+#[tokio::test]
+async fn window_lengths_keep_the_shortest_gap_between_passed_resets() {
+    let (history, directory) = fixture().await;
+    let start = at();
+    let hours = time::Duration::hours;
+    let observed = |at: OffsetDateTime, resets_at: OffsetDateTime| {
+        let mut point = point(account(), at, 50.0);
+        point.observation.resets_at = Some(resets_at);
+        point
+    };
+    // 5h window, then a reset announced 6h after the last one (idle stretch),
+    // and an observation whose reset has not passed yet.
+    let points = vec![
+        observed(start, start + hours(2)),
+        observed(start + hours(3), start + hours(7)),
+        observed(start + hours(4), start + hours(7)),
+        observed(start + hours(8), start + hours(13)),
+    ];
+    history
+        .record(points, history.revision(), start + hours(8))
+        .await
+        .unwrap();
+    let key = ("account".to_string(), "session".to_string());
+    let windows = history.window_lengths("host".into()).await.unwrap();
+    assert_eq!(windows.get(&key), Some(&(5 * 3600)));
+    assert!(
+        history
+            .window_lengths("other".into())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // A shorter gap recorded later replaces the cached value, rounded to the minute.
+    let shorter = start + hours(13) + time::Duration::hours(4) + time::Duration::minutes(55);
+    history
+        .record(
+            vec![observed(
+                start + hours(14),
+                shorter + time::Duration::seconds(20),
+            )],
+            history.revision(),
+            start + hours(14),
+        )
+        .await
+        .unwrap();
+    let windows = history.window_lengths("host".into()).await.unwrap();
+    assert_eq!(windows.get(&key), Some(&(4 * 3600 + 55 * 60)));
+
+    // Gaps under an hour are noise, not windows.
+    let next = shorter + time::Duration::seconds(20) + hours(5);
+    history
+        .record(
+            vec![
+                observed(start + hours(20), next),
+                observed(start + hours(24), next + time::Duration::minutes(30)),
+            ],
+            history.revision(),
+            start + hours(24),
+        )
+        .await
+        .unwrap();
+    let windows = history.window_lengths("host".into()).await.unwrap();
+    assert_eq!(windows.get(&key), Some(&(4 * 3600 + 55 * 60)));
+    drop(history);
+    std::fs::remove_dir_all(directory).unwrap();
+}
