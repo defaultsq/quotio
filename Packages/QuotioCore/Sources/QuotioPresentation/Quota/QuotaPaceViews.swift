@@ -200,6 +200,8 @@ struct QuotaRateText {
 struct QuotaLimitRow: View {
     let meter: QuotaMeter
     var showsInsight = false
+    /// Recorded use per day, shown in place of a reset the limit does not have.
+    var trendPerDay: Double?
 
     private var insightPace: QuotaPace? {
         guard showsInsight, let pace = meter.pace, pace.usedPerDay > 0 else { return nil }
@@ -268,6 +270,16 @@ struct QuotaLimitRow: View {
                     .lineLimit(1)
                 }
             }
+        } else if let trendPerDay {
+            Label {
+                Text(String(format: "quota.trend.week".localized(),
+                            String(format: "quota.rate.day".localized(), QuotaTimeText.percent(trendPerDay))))
+            } icon: {
+                Image(systemName: "chart.line.downtrend.xyaxis")
+                    .foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
         } else {
             // Keeps every row the same height whether or not a reset is known.
             Text(" ").accessibilityHidden(true)
@@ -317,6 +329,17 @@ struct QuotaExhaustedBanner: View {
 struct QuotaHistoryPoint: Equatable, Sendable {
     let date: Date
     let remaining: Double
+
+    /// Average share used per day since the first point, for limits with no
+    /// reset to pace against. Top-ups between points do not count against use.
+    static func usedPerDay(_ points: [QuotaHistoryPoint], now: Date = Date()) -> Double? {
+        let points = points.sorted { $0.date < $1.date }
+        guard let first = points.first else { return nil }
+        let days = now.timeIntervalSince(first.date) / 86_400
+        guard days >= 1 else { return nil }
+        let used = zip(points, points.dropFirst()).reduce(0) { $0 + max(0, $1.0.remaining - $1.1.remaining) }
+        return used > 0 ? used / days : nil
+    }
 }
 
 /// The window so far, the even-pace line, where the current rate leads, and

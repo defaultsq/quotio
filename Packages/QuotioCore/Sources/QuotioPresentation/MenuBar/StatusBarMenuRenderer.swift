@@ -700,7 +700,8 @@ private struct MenuAccountCardView: View {
 }
 
 /// The account's submenu: a chart for each paced limit, drawn from recorded
-/// history when there is some, and a plain row for limits without a window.
+/// history when there is some, and a plain row with the week's use for limits
+/// without a window.
 private struct MenuAccountDetailView: View {
     let email: String
     let data: ProviderQuota
@@ -736,7 +737,8 @@ private struct MenuAccountDetailView: View {
                 } else if let pace = meter.pace {
                     QuotaBurnCard(meter: meter, pace: pace, history: history[meter.metric.id] ?? [])
                 } else {
-                    QuotaLimitRow(meter: meter)
+                    QuotaLimitRow(meter: meter,
+                                  trendPerDay: history[meter.metric.id].flatMap { QuotaHistoryPoint.usedPerDay($0) })
                 }
             }
             if meters.contains(where: { $0.pace != nil && !$0.isExhausted }) {
@@ -746,9 +748,10 @@ private struct MenuAccountDetailView: View {
         .padding(.horizontal, MenuItemMetrics.contentInset)
         .padding(.vertical, 10)
         .task {
-            for meter in meters where !meter.isExhausted {
-                guard let pace = meter.pace else { continue }
-                history[meter.metric.id] = await loadHistory(meter.metric.id, Self.range(for: pace.windowDuration))
+            for meter in meters where !meter.isExhausted && meter.hasData {
+                // Without a window, the last week of use stands in for pace.
+                let range = meter.pace.map { Self.range(for: $0.windowDuration) } ?? .week
+                history[meter.metric.id] = await loadHistory(meter.metric.id, range)
             }
         }
     }
