@@ -137,6 +137,25 @@ fn reset_description(text: &str) -> Option<String> {
     .ok()?;
     Some(format!("billing period ends {date} (timezone unspecified)"))
 }
+/// The billing period's end and length. The CLI prints dates without a time zone,
+/// so the end is read as midnight UTC: hours off at most, on a month-long window.
+fn billing_period(text: &str) -> Option<(OffsetDateTime, u64)> {
+    let (_, period) = text.split_once(" - period ")?;
+    let (start, rest) = period.split_once(" to ")?;
+    let end = rest.split_whitespace().next()?.trim_end_matches(',');
+    let format = time::macros::format_description!("[year]-[month]-[day]");
+    let start = time::Date::parse(start.trim(), format).ok()?;
+    let end = time::Date::parse(end, format).ok()?;
+    let length = u64::try_from((end - start).whole_seconds()).ok()?;
+    (length > 0).then(|| (end.midnight().assume_utc(), length))
+}
+fn apply_period(windows: &mut [QuotaWindow], period: Option<(OffsetDateTime, u64)>) {
+    let Some((end, length)) = period else { return };
+    for window in windows {
+        window.resets_at = Some(end);
+        window.window_seconds = Some(length);
+    }
+}
 fn balance(input: &str, unit: &str) -> Result<QuotaAmounts, ProviderError> {
     let (remaining, rest) = input.split_once(unit).ok_or(ProviderError::InvalidData)?;
     let limit = rest
@@ -258,6 +277,8 @@ pub(crate) fn parse(input: &str, now: OffsetDateTime) -> Result<ProviderUsage, P
                 return Err(ProviderError::InvalidData);
             }
             plan = Some(name.trim().into());
+            let period = billing_period(rest);
+            let first = windows.len();
             if !rest.starts_with("agent usage ") {
                 let (agent, orb) = rest.split_once(" and ").ok_or(ProviderError::InvalidData)?;
                 if !(agent.contains("% other usage") || agent.contains("% agent usage"))
@@ -279,6 +300,7 @@ pub(crate) fn parse(input: &str, now: OffsetDateTime) -> Result<ProviderUsage, P
                     now,
                     reset_description(rest),
                 ));
+                apply_period(&mut windows[first..], period);
                 continue;
             }
             let rest = rest.strip_prefix("agent usage ").unwrap();
@@ -312,6 +334,7 @@ pub(crate) fn parse(input: &str, now: OffsetDateTime) -> Result<ProviderUsage, P
                     reset_description(rest),
                 ));
             }
+            apply_period(&mut windows[first..], period);
         } else if let Some(rest) = line.strip_prefix("Individual credits:") {
             let amounts = dollars(rest)?;
             windows.push(window(
@@ -729,7 +752,11 @@ mod tests {
         assert_eq!(usage.windows[4].quota, Quota::Unknown);
         assert_eq!(usage.windows[4].label, "Workspace credits");
         assert_eq!(usage.windows[4].amounts.as_ref().unwrap().remaining, 0.0);
-        assert!(usage.windows.iter().all(|w| w.resets_at.is_none()));
+        assert!(
+            [0, 3, 4]
+                .iter()
+                .all(|&i| usage.windows[i].resets_at.is_none())
+        );
     }
     #[test]
     fn format_drift_and_missing_identity_fail() {
@@ -837,7 +864,7 @@ mod tests {
         std::fs::remove_dir(directory).unwrap();
     }
     #[test]
-    fn reset_descriptions_are_preserved_without_fabricating_timestamps() {
+    fn subscription_resets_at_the_billing_period_end() {
         for text in [FIXTURE.to_owned(), FIXTURE.replace("**", "")] {
             let usage = parse(&text, OffsetDateTime::UNIX_EPOCH).unwrap();
             assert_eq!(usage.windows[0].reset_description.as_deref(), Some("daily"));
@@ -847,14 +874,21 @@ mod tests {
                     Some("upon renewal in 13 days")
                 );
             }
-            assert!(usage.windows.iter().all(|w| w.resets_at.is_none()));
+            for window in &usage.windows[1..3] {
+                assert_eq!(
+                    window.resets_at,
+                    Some(time::macros::datetime!(2026-09-19 00:00 UTC))
+                );
+                assert_eq!(window.window_seconds, Some(31 * 24 * 60 * 60));
+            }
+            assert!(usage.windows[0].resets_at.is_none());
             assert!(
                 usage.windows[3..]
                     .iter()
                     .all(|w| w.reset_description.is_none())
             );
             let value = serde_json::to_value(&usage).unwrap();
-            assert!(value["windows"][1]["resets_at"].is_null());
+            assert_eq!(value["windows"][1]["resets_at"], "2026-09-19T00:00:00Z");
             assert_eq!(
                 value["windows"][1]["reset_description"],
                 "upon renewal in 13 days"

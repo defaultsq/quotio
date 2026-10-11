@@ -272,7 +272,7 @@ fn plan_display_name(provider: &str, raw: &str) -> String {
 
 /// Period length implied by labels that name it outright, for sources that
 /// never state one. "Session" is not a period: its length varies by provider.
-fn labeled_window_seconds(label: &str) -> Option<u64> {
+fn labeled_window_seconds(label: &str, resets_at: Option<OffsetDateTime>) -> Option<u64> {
     const HOUR: u64 = 60 * 60;
     let label = label.to_ascii_lowercase();
     let words: Vec<&str> = label
@@ -286,6 +286,24 @@ fn labeled_window_seconds(label: &str) -> Option<u64> {
         Some(7 * 24 * HOUR)
     } else if has("daily") || has("1d") {
         Some(24 * HOUR)
+    } else if has("monthly") {
+        // A calendar month ends at the reset, so its length depends on which month it is.
+        let reset = resets_at?;
+        let (year, month) = match reset.month().previous() {
+            time::Month::December => (reset.year() - 1, time::Month::December),
+            previous => (reset.year(), previous),
+        };
+        let start = reset
+            .replace_day(1)
+            .ok()?
+            .replace_year(year)
+            .ok()?
+            .replace_month(month)
+            .ok()?;
+        let start = start
+            .replace_day(reset.day().min(month.length(year)))
+            .ok()?;
+        u64::try_from((reset - start).whole_seconds()).ok()
     } else {
         None
     }
@@ -328,7 +346,7 @@ fn observation(
                 reset_description: window.reset_description.clone(),
                 window_seconds: window
                     .window_seconds
-                    .or_else(|| labeled_window_seconds(&window.label)),
+                    .or_else(|| labeled_window_seconds(&window.label, window.resets_at)),
                 fetched_at: window.fetched_at,
                 provenance: window.provenance.clone(),
             }

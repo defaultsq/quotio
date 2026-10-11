@@ -550,18 +550,29 @@ async fn resolved_snapshot(
             StatusCode::SERVICE_UNAVAILABLE,
             "account_storage_disabled",
         ))?;
-        return crate::accounts::api::resolved_snapshot(vault, report, now, ttl)
+        let mut snapshot = crate::accounts::api::resolved_snapshot(vault, report, now, ttl)
             .await
-            .map(|mut snapshot| {
-                state.restrict_snapshot(&mut snapshot, &principal);
-                Json(snapshot)
-            })
             .map_err(|error| {
                 ApiError(
                     StatusCode::SERVICE_UNAVAILABLE,
                     management::account_code(&error),
                 )
-            });
+            })?;
+        if let Some(history) = &state.history
+            && let Ok(windows) = history.window_lengths(snapshot.host.id.clone()).await
+        {
+            for usage in &mut snapshot.usage {
+                for metric in &mut usage.metrics {
+                    metric.window_seconds = metric.window_seconds.or_else(|| {
+                        windows
+                            .get(&(usage.account_id.clone(), metric.id.clone()))
+                            .copied()
+                    });
+                }
+            }
+        }
+        state.restrict_snapshot(&mut snapshot, &principal);
+        return Ok(Json(snapshot));
     }
     // This mode deliberately never opens the protected account vault. Its host ID is session-scoped.
     let mut previous = state.transient_snapshot.lock().await;

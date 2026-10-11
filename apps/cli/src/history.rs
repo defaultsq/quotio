@@ -27,6 +27,7 @@ impl From<rusqlite::Error> for Error {
     }
 }
 type Result<T, E = Error> = std::result::Result<T, E>;
+type WindowLengths = HashMap<(String, String), u64>;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Observation {
     pub series_id: String,
@@ -163,6 +164,7 @@ struct Store {
     error: Option<String>,
     last_pruned: OffsetDateTime,
     cursors: HashMap<String, Cursor>,
+    windows: Option<(String, i64, WindowLengths)>,
     #[cfg(windows)]
     _directory_guards: Vec<std::fs::File>,
 }
@@ -266,6 +268,11 @@ impl History {
     ) -> Result<Chart> {
         self.call(move |s| s.chart(account, metric, range, enabled, now))
             .await
+    }
+    /// Window lengths seen between recorded resets, by account and metric ID, for
+    /// providers that report when a limit resets but not how long its window is.
+    pub async fn window_lengths(&self, host: String) -> Result<WindowLengths> {
+        self.call(move |s| s.window_lengths(host)).await
     }
     pub async fn events(
         &self,
@@ -432,6 +439,7 @@ impl Store {
             error,
             last_pruned: OffsetDateTime::UNIX_EPOCH,
             cursors: HashMap::new(),
+            windows: None,
             #[cfg(windows)]
             _directory_guards: directory_guards,
         };
@@ -894,6 +902,66 @@ fn state(quota: &Quota) -> &'static str {
         Quota::Unlimited => "unlimited",
         Quota::Limit { .. } => "limit",
     }
+}
+impl Store {
+    fn window_lengths(&mut self, host: String) -> Result<WindowLengths> {
+        let latest: i64 = self.db.query_row(
+            "SELECT IFNULL(MAX(sequence),0) FROM history_observations",
+            [],
+            |r| r.get(0),
+        )?;
+        if let Some((cached_host, sequence, windows)) = &self.windows
+            && *cached_host == host
+            && *sequence == latest
+        {
+            return Ok(windows.clone());
+        }
+        let mut statement = self.db.prepare(
+            "SELECT s.account,s.metric,o.payload FROM history_observations o JOIN history_series s ON s.id=o.series WHERE s.host=? ORDER BY o.series,o.at",
+        )?;
+        let rows = statement.query_map([&host], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut windows = HashMap::new();
+        let mut previous: Option<(String, String, Observation)> = None;
+        for row in rows {
+            let (account, metric, payload) = row?;
+            let observation: Observation =
+                serde_json::from_str(&payload).map_err(|_| Error::Storage)?;
+            if let Some((_, _, before)) = previous.as_ref().filter(|(a, m, before)| {
+                *a == account && *m == metric && before.series_id == observation.series_id
+            }) && let Some(length) = window_between_resets(before, &observation)
+            {
+                windows
+                    .entry((account.clone(), metric.clone()))
+                    .and_modify(|known: &mut u64| *known = (*known).min(length))
+                    .or_insert(length);
+            }
+            previous = Some((account, metric, observation));
+        }
+        drop(statement);
+        self.windows = Some((host, latest, windows.clone()));
+        Ok(windows)
+    }
+}
+/// The gap between a reset that passed and the next one announced after it.
+/// Rolling windows that start on first use stretch over idle time, so callers
+/// keep the shortest gap seen.
+fn window_between_resets(before: &Observation, after: &Observation) -> Option<u64> {
+    const MINUTE: i64 = 60;
+    let reset = before.resets_at?;
+    let next = after.resets_at?;
+    if reset <= before.fetched_at || reset > after.fetched_at || next <= reset {
+        return None;
+    }
+    let minutes = ((next - reset).whole_seconds() + MINUTE / 2) / MINUTE;
+    u64::try_from(minutes * MINUTE)
+        .ok()
+        .filter(|&seconds| seconds >= 60 * 60)
 }
 fn derive_events(points: &[Observation]) -> Vec<Event> {
     points
