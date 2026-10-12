@@ -500,20 +500,27 @@ private struct QuotaBurnChart: View {
     }
 
     /// Start and reset labels pin to the edges; "Now" and the projected empty
-    /// day sit under their points and drop out when they would collide.
+    /// day sit under their points and drop out when they would collide. Close
+    /// to the reset, "Now" joins the reset label instead.
     private func axisLabels(now: Date) -> some View {
         GeometryReader { proxy in
             let width = proxy.size.width
             let nowX = xPosition(now, width: width)
             let emptyX = pace.projectedEmpty.map { xPosition($0, width: width) }
-            let reset = Text(String(format: "quota.chart.reset".localized(), edgeText(pace.resetsAt)))
+            let resetText = edgeText(pace.resetsAt)
+            let startText = edgeText(pace.windowStart)
             ZStack(alignment: .topLeading) {
-                Text(edgeText(pace.windowStart))
+                // A weekly window opens and resets on the same weekday, so the start shows its date.
+                Text(startText == resetText ? QuotaTimeText.day(pace.windowStart) : startText)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                reset
-                    .foregroundStyle(.blue)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                HStack(spacing: 6) {
+                    if nowX >= width - 75 {
+                        Text("quota.chart.now".localized()).foregroundStyle(.primary)
+                    }
+                    Text(String(format: "quota.chart.reset".localized(), resetText)).foregroundStyle(.blue)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
                 if nowX > 40, nowX < width - 75, !isBehind || emptyX.map({ abs($0 - nowX) > 40 }) ?? true {
                     Text("quota.chart.now".localized())
                         .foregroundStyle(.primary)
