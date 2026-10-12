@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - View account quota history from the Quota screen, with separate metrics, 24-hour/7-day/30-day ranges, remaining/used display, observed gaps, and reset evidence.
 - Keep 30 days of quota observations on the owning host. Pause recording or clear account/all-host history without changing current quota or credentials; history access is owner-only.
+- Open an account's quota history from its row menu or the labeled button on its quota card. Quota history controls are grouped in Settings.
+- Show a burn chart for each limit in an account submenu, and forecast usage from the live pace.
+- Show weekly use for limits that have no reset, and show resets that only have a day as dates.
+
+### Changed
+
+- Replace the quota display styles with pace-tick densities. Pace is measured against each window's even spend, and window lengths are inferred for monthly, billing-period and recorded windows.
+
+### Fixed
+
+- Keep burn chart labels readable near the reset.
+- Read Claude quota while a token refresh is uncertain, and release the refresh lock when the token was never used or a request is cancelled, so quota reads no longer stall behind it.
 
 ## [1.0.0-beta.5] - 2026-10-10
 
