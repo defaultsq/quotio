@@ -927,16 +927,24 @@ impl ManagedProvider {
         let updated = match self.operations.refresh(context, &latest).await {
             Ok(updated) => updated,
             Err(AccountError::RefreshUnused(error)) => {
-                let mut tx = begin(self.vault.clone()).await?;
-                if let Some(account) = tx
-                    .document
-                    .accounts
-                    .iter_mut()
-                    .find(|a| a.id == self.id && a.credential == latest)
-                {
-                    account.credential = credential;
-                    commit(tx).await?;
-                }
+                let (vault, id) = (self.vault.clone(), self.id.clone());
+                // Detached so the fetch deadline cannot drop the release before it commits.
+                tokio::spawn(async move {
+                    let _guard = guard;
+                    let mut tx = begin(vault).await?;
+                    if let Some(account) = tx
+                        .document
+                        .accounts
+                        .iter_mut()
+                        .find(|a| a.id == id && a.credential == latest)
+                    {
+                        account.credential = credential;
+                        commit(tx).await?;
+                    }
+                    Ok::<_, AccountError>(())
+                })
+                .await
+                .map_err(|_| AccountError::Storage)??;
                 return Err(error.into());
             }
             Err(error) => return Err(error),
@@ -4610,6 +4618,77 @@ mod tests {
             let tx = vault.begin().unwrap();
             assert!(tx.document.accounts[0].credential == original);
         }
+        cleanup(path);
+    }
+    #[tokio::test]
+    async fn claude_refresh_fence_release_survives_a_dropped_read() {
+        struct HeldVault {
+            vault: Vault,
+            held: std::sync::Mutex<Option<Transaction>>,
+        }
+        impl Operations for HeldVault {
+            fn quota<'a>(
+                &'a self,
+                _: &'a ProviderContext,
+                _: Provider,
+                _: &'a Credential,
+            ) -> OperationFuture<'a, ProviderUsage> {
+                Box::pin(async { unreachable!("an expired token never reads quota") })
+            }
+            fn refresh<'a>(
+                &'a self,
+                _: &'a ProviderContext,
+                _: &'a Credential,
+            ) -> OperationFuture<'a, Credential> {
+                Box::pin(async move {
+                    *self.held.lock().unwrap() = Some(self.vault.begin().unwrap());
+                    Err(AccountError::RefreshUnused(ProviderError::RateLimited))
+                })
+            }
+        }
+        let (vault, fake, id, _, path) = setup(0, false, false, false);
+        let original = Credential::ClaudeOAuth {
+            access_token: "old".into(),
+            refresh_token: "refresh".into(),
+            account_id: "id".into(),
+            email: "demo@example.com".into(),
+            expires_at: 0,
+            refresh_pending: false,
+        };
+        let mut tx = vault.begin().unwrap();
+        tx.document.accounts[0].provider = Provider::Catalog("claude");
+        tx.document.accounts[0].credential = original.clone();
+        tx.document.reserve_factory_refresh(&id, &original).unwrap();
+        tx.commit().unwrap();
+        let operations = Arc::new(HeldVault {
+            vault: vault.clone(),
+            held: std::sync::Mutex::new(None),
+        });
+        let mut adapter = managed(vault.clone(), fake, id, Provider::Catalog("claude"));
+        adapter.operations = operations.clone();
+        let context = http::fixture::context();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), adapter.read(&context))
+                .await
+                .is_err()
+        );
+        drop(operations.held.lock().unwrap().take());
+        let restored = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if vault
+                    .begin()
+                    .is_ok_and(|tx| tx.document.accounts[0].credential == original)
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await;
+        assert!(
+            restored.is_ok(),
+            "the fence release outlives the dropped read"
+        );
         cleanup(path);
     }
     #[tokio::test]
