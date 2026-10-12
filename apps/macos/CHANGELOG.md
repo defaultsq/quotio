@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.6] - 2026-10-12
+
 ### Added
 
 - View account quota history from the Quota screen, with separate metrics, 24-hour/7-day/30-day ranges, remaining/used display, observed gaps, and reset evidence.
