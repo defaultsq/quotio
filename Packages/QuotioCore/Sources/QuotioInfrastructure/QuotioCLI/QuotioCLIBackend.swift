@@ -70,6 +70,7 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
                     if code.contains("storage") { throw QuotaHistoryError.storage }
                     throw QuotaHistoryError.requestFailed
                 case .timeout: throw QuotaHistoryError.requestFailed
+                @unknown default: throw QuotaHistoryError.requestFailed
                 }
             }
             if let network = error as? URLError, [.notConnectedToInternet, .cannotConnectToHost, .cannotFindHost, .networkConnectionLost].contains(network.code) {
