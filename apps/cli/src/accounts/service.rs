@@ -924,7 +924,23 @@ impl ManagedProvider {
             account.credential = latest.clone();
             commit(tx).await?;
         }
-        let updated = self.operations.refresh(context, &latest).await?;
+        let updated = match self.operations.refresh(context, &latest).await {
+            Ok(updated) => updated,
+            Err(AccountError::RefreshUnused(error)) => {
+                let mut tx = begin(self.vault.clone()).await?;
+                if let Some(account) = tx
+                    .document
+                    .accounts
+                    .iter_mut()
+                    .find(|a| a.id == self.id && a.credential == latest)
+                {
+                    account.credential = credential;
+                    commit(tx).await?;
+                }
+                return Err(error.into());
+            }
+            Err(error) => return Err(error),
+        };
         let mut tx = begin(self.vault.clone()).await?;
         tx.document.reserve_factory_refresh(&self.id, &updated)?;
         let result = match tx

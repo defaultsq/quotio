@@ -71,6 +71,9 @@ pub enum AccountError {
     CallbackPort,
     #[error("OAuth callback or token response is invalid")]
     OAuth,
+    /// The provider never processed the refresh request, so its refresh token is still unused.
+    #[error("credential validation failed: {0}")]
+    RefreshUnused(ProviderError),
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
