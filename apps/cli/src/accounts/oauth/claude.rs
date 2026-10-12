@@ -1,6 +1,7 @@
 use super::{Authorization, challenge};
 use crate::{
     accounts::{AccountError, Credential, random_string},
+    error::ProviderError,
     providers::{ProviderContext, http},
 };
 use serde::Deserialize;
@@ -141,9 +142,25 @@ async fn refresh_at(
     let Credential::ClaudeOAuth { refresh_token, .. } = previous else {
         return Err(AccountError::Unsupported);
     };
-    let tokens = http::json(context.http.post(endpoint).json(&json!({
+    let response = match context.http.post(endpoint).json(&json!({
         "grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": CLIENT_ID, "scope": SCOPE,
-    })), context.clock.now()).await?;
+    })).send().await {
+        Ok(response) => response,
+        Err(error) if error.is_connect() => {
+            return Err(AccountError::RefreshUnused(ProviderError::Transient));
+        }
+        Err(error) => return Err(http::send_error(error).into()),
+    };
+    let throttled = response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS;
+    let tokens = http::json_response(response, context.clock.now())
+        .await
+        .map_err(|error| {
+            if throttled {
+                AccountError::RefreshUnused(error)
+            } else {
+                error.into()
+            }
+        })?;
     credential(tokens, Some(previous), context.clock.now().unix_timestamp())
 }
 #[cfg(test)]
