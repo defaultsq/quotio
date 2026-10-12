@@ -167,6 +167,40 @@ async fn refresh_at(
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn refresh_reports_requests_the_provider_never_processed() {
+        let previous = Credential::ClaudeOAuth {
+            access_token: "old".into(),
+            refresh_token: "refresh".into(),
+            account_id: "id".into(),
+            email: "demo@example.com".into(),
+            expires_at: 0,
+            refresh_pending: true,
+        };
+        for (status, body, unused) in [
+            (429, json!({}), true),
+            (400, json!({"error":"invalid_grant"}), false),
+            (401, json!({}), false),
+            (500, json!({}), false),
+            (200, json!({"access_token":"new"}), false),
+        ] {
+            let (url, task) = http::fixture::server_status(vec![(status, body)]).await;
+            let result = refresh_at(&http::fixture::context(), &previous, &url).await;
+            task.await.unwrap();
+            assert_eq!(
+                matches!(result, Err(AccountError::RefreshUnused(_))),
+                unused,
+                "status {status}"
+            );
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        assert!(matches!(
+            refresh_at(&http::fixture::context(), &previous, &url).await,
+            Err(AccountError::RefreshUnused(ProviderError::Transient))
+        ));
+    }
+    #[tokio::test]
     async fn exchange_and_refresh_contract() {
         let authorization = begin().unwrap();
         let code = format!("fixture-code#{}", authorization.state);
