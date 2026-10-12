@@ -22,6 +22,8 @@ public final class QuotaHistoryScreenModel: Identifiable {
     public private(set) var metricID: String?
     public private(set) var range: QuotaHistoryRange = .day
     public var selectedBinID: Int?
+    /// The account's live quota, so the sheet paces a metric with the same numbers as the menu.
+    public private(set) var quota: ProviderQuota?
     @ObservationIgnored private let useCases: QuotaHistoryUseCases
     @ObservationIgnored private let coordinator: (any QuotaCoordinating)?
     @ObservationIgnored private let provider: QuotaProvider?
@@ -30,7 +32,6 @@ public final class QuotaHistoryScreenModel: Identifiable {
     @ObservationIgnored private var observation: Task<Void, Never>?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var isActive = false
-    @ObservationIgnored private var lastQuota: ProviderQuota?
     @ObservationIgnored private var boundHostID: String?
     @ObservationIgnored private var lastHostRevision: UInt64?
 
@@ -43,6 +44,7 @@ public final class QuotaHistoryScreenModel: Identifiable {
     deinit { request?.cancel(); pageRequest?.cancel(); observation?.cancel() }
 
     public var selectedMetric: QuotaHistoryMetric? { catalog?.metrics.first { $0.id == metricID } }
+    public var liveMetric: QuotaMetric? { quota?.models.first { $0.id == metricID } }
     public var selectedBin: QuotaHistoryBin? { chart?.bins.first { $0.id == selectedBinID } }
     public var selectedEvents: [QuotaHistoryEvent] {
         guard let bin = selectedBin else { return [] }
@@ -68,7 +70,7 @@ public final class QuotaHistoryScreenModel: Identifiable {
                     if hostChanged {
                         self.cancelReads()
                         self.catalog = nil; self.chart = nil; self.events = []; self.nextCursor = nil
-                        self.metricID = nil; self.selectedBinID = nil; self.lastQuota = nil
+                        self.metricID = nil; self.selectedBinID = nil; self.quota = nil
                     }
                     self.availability = next
                     if let boundHostID = self.boundHostID, let hostID = next.hostID, boundHostID != hostID {
@@ -85,8 +87,8 @@ public final class QuotaHistoryScreenModel: Identifiable {
                             continue
                         }
                         let quota = state.quotas[provider]?[self.accountID]
-                        if self.lastQuota != quota || connectionChanged || self.lastHostRevision != state.hostRevision {
-                            self.lastQuota = quota
+                        if self.quota != quota || connectionChanged || self.lastHostRevision != state.hostRevision {
+                            self.quota = quota
                             self.lastHostRevision = state.hostRevision
                             self.reload()
                         }
