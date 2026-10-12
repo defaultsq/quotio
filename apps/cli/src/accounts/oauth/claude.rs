@@ -151,16 +151,11 @@ async fn refresh_at(
         }
         Err(error) => return Err(http::send_error(error).into()),
     };
-    let throttled = response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS;
-    let tokens = http::json_response(response, context.clock.now())
-        .await
-        .map_err(|error| {
-            if throttled {
-                AccountError::RefreshUnused(error)
-            } else {
-                error.into()
-            }
-        })?;
+    // Waiting out Retry-After here could outlive the fetch deadline and skip the fence release.
+    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err(AccountError::RefreshUnused(ProviderError::RateLimited));
+    }
+    let tokens = http::json_response(response, context.clock.now()).await?;
     credential(tokens, Some(previous), context.clock.now().unix_timestamp())
 }
 #[cfg(test)]
@@ -199,6 +194,29 @@ mod tests {
             refresh_at(&http::fixture::context(), &previous, &url).await,
             Err(AccountError::RefreshUnused(ProviderError::Transient))
         ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 8192];
+            let _ = socket.read(&mut request).await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 429 Test\r\nRetry-After: 600\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            refresh_at(&http::fixture::context(), &previous, &url),
+        )
+        .await
+        .expect("a 429 must not wait out Retry-After");
+        assert!(matches!(
+            result,
+            Err(AccountError::RefreshUnused(ProviderError::RateLimited))
+        ));
+        task.await.unwrap();
     }
     #[tokio::test]
     async fn exchange_and_refresh_contract() {
