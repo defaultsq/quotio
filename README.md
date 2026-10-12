@@ -64,6 +64,32 @@ Both products live in this repository and share one goal: make AI coding usage
 visible and manageable without sending your credentials through a hosted Quotio
 service.
 
+## Sponsors
+
+<table>
+  <tr>
+    <td width="180" align="center">
+      <a href="https://www.swiftproxy.net/?ref=quotio">
+        <img src=".github/assets/sponsors/swiftproxy.png" alt="Swiftproxy logo" width="160" />
+      </a>
+    </td>
+    <td>
+      Power your AI-powered workflows with
+      <a href="https://www.swiftproxy.net/?ref=quotio">Swiftproxy</a>, a residential
+      proxy provider offering rotating and static residential proxies for reliable web
+      access and data collection. Access 90M+ residential IPs across 220+ locations,
+      with HTTP(S), SOCKS5, and flexible rotating and sticky sessions. Try it for free
+      and get started with residential proxies from just $0.7/GB. Use code
+      <strong>PROXY90</strong> for an additional 10% off.
+      <br />
+      <a href="https://www.swiftproxy.net/?ref=quotio">Explore Swiftproxy →</a>
+    </td>
+  </tr>
+</table>
+
+Interested in sponsoring Quotio? Contact
+[quotio@bytrong.app](mailto:quotio@bytrong.app).
+
 ## Quotio for macOS
 
 The native SwiftUI app is the full command center. It combines provider quota,
