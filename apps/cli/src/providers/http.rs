@@ -17,14 +17,15 @@ pub(crate) async fn json<T: DeserializeOwned>(
     request: RequestBuilder,
     now: OffsetDateTime,
 ) -> Result<T, ProviderError> {
-    let response = request.send().await.map_err(|error| {
-        if error.is_timeout() {
-            ProviderError::Timeout
-        } else {
-            ProviderError::Transient
-        }
-    })?;
+    let response = request.send().await.map_err(send_error)?;
     json_response(response, now).await
+}
+pub(crate) fn send_error(error: reqwest::Error) -> ProviderError {
+    if error.is_timeout() {
+        ProviderError::Timeout
+    } else {
+        ProviderError::Transient
+    }
 }
 pub(crate) async fn json_response<T: DeserializeOwned>(
     mut response: reqwest::Response,
