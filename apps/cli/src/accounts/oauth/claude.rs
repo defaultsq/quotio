@@ -147,7 +147,7 @@ async fn refresh_at(
     })).send().await {
         Ok(response) => response,
         Err(error) if error.is_connect() => {
-            return Err(AccountError::RefreshUnused(ProviderError::Transient));
+            return Err(AccountError::RefreshUnused(http::send_error(error)));
         }
         Err(error) => return Err(http::send_error(error).into()),
     };
