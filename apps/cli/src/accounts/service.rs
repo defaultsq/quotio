@@ -4551,6 +4551,68 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn claude_refresh_the_provider_never_processed_releases_the_fence() {
+        struct UnusedRefresh {
+            refreshes: AtomicUsize,
+        }
+        impl Operations for UnusedRefresh {
+            fn quota<'a>(
+                &'a self,
+                _: &'a ProviderContext,
+                _: Provider,
+                _: &'a Credential,
+            ) -> OperationFuture<'a, ProviderUsage> {
+                Box::pin(async { unreachable!("an expired token never reads quota") })
+            }
+            fn refresh<'a>(
+                &'a self,
+                _: &'a ProviderContext,
+                credential: &'a Credential,
+            ) -> OperationFuture<'a, Credential> {
+                Box::pin(async move {
+                    assert!(matches!(
+                        credential,
+                        Credential::ClaudeOAuth {
+                            refresh_pending: true,
+                            ..
+                        }
+                    ));
+                    self.refreshes.fetch_add(1, Ordering::SeqCst);
+                    Err(AccountError::RefreshUnused(ProviderError::RateLimited))
+                })
+            }
+        }
+        let (vault, fake, id, _, path) = setup(0, false, false, false);
+        let original = Credential::ClaudeOAuth {
+            access_token: "old".into(),
+            refresh_token: "refresh".into(),
+            account_id: "id".into(),
+            email: "demo@example.com".into(),
+            expires_at: 0,
+            refresh_pending: false,
+        };
+        let mut tx = vault.begin().unwrap();
+        tx.document.accounts[0].provider = Provider::Catalog("claude");
+        tx.document.accounts[0].credential = original.clone();
+        tx.document.reserve_factory_refresh(&id, &original).unwrap();
+        tx.commit().unwrap();
+        let operations = Arc::new(UnusedRefresh {
+            refreshes: AtomicUsize::new(0),
+        });
+        let mut adapter = managed(vault.clone(), fake, id, Provider::Catalog("claude"));
+        adapter.operations = operations.clone();
+        for attempt in 1..=2 {
+            assert!(matches!(
+                adapter.read(&http::fixture::context()).await,
+                Err(AccountError::Provider(ProviderError::RateLimited))
+            ));
+            assert_eq!(operations.refreshes.load(Ordering::SeqCst), attempt);
+            let tx = vault.begin().unwrap();
+            assert!(tx.document.accounts[0].credential == original);
+        }
+        cleanup(path);
+    }
+    #[tokio::test]
     async fn claude_refresh_fence_survives_failure_restart_and_removal() {
         for failure in [false, true] {
             let (vault, fake, id, _, path) = setup(0, false, failure, false);
