@@ -314,7 +314,8 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
 
     public func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, label: String?) async throws {
         guard let client else { throw LocalAccountFailure.unknown }
-        let body = try JSONEncoder.quotioCLI.encode(LocalSourceBody(kind: kind, configDir: configDirectory, label: label))
+        // Claude Code NFC-normalizes CLAUDE_CONFIG_DIR before hashing it into its Keychain service.
+        let body = try JSONEncoder.quotioCLI.encode(LocalSourceBody(kind: kind, configDir: configDirectory.precomposedStringWithCanonicalMapping, label: label))
         do {
             do {
                 try await mutate(client: client, path: "v2/sources", method: "POST", body: body)
