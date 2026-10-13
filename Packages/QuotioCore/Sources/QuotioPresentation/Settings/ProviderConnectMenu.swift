@@ -11,6 +11,7 @@ struct ProviderConnectMenu: View {
 
     static func isConnectable(_ provider: MonitoringProvider) -> Bool {
         !provider.actions.isDisjoint(with: ["start_oauth", "add_api_key", "discover_native"])
+            || provider.configDirectorySource != nil
     }
 
     var body: some View {
@@ -22,6 +23,11 @@ struct ProviderConnectMenu: View {
         if provider.actions.contains("add_api_key") {
             Button("settings.addAPIKey".localized()) {
                 connect { model.sheet = .apiKey(provider.id, nil) }
+            }
+        }
+        if provider.configDirectorySource != nil {
+            Button("settings.localAccount.menu".localized()) {
+                connect { model.sheet = .localAccount(provider.id) }
             }
         }
         if provider.actions.contains("discover_native") {

@@ -74,6 +74,12 @@ public final class AccountsScreenModel {
         await reloadAccounts()
     }
 
+    public func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, label: String?) async throws {
+        try await accountService.addLocalAccount(provider: provider, kind: kind, configDirectory: configDirectory, label: label)
+        storageProblem = await accountService.accountStorageProblem()
+        await reloadAccounts()
+    }
+
     public func authorizeAccountStorage() async throws {
         guard !authorizingStorage else { return }
         authorizingStorage = true
