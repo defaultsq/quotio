@@ -17,7 +17,20 @@ public enum NativeSourceAuthorizationFailure: Error, Equatable, Sendable {
     case unknown
 }
 
+/// One login inside a config directory that holds several, such as a multi-account `GROK_HOME`.
+public struct LocalAccountEntry: Equatable, Identifiable, Sendable {
+    public let entryKey: String
+    public let label: String
+    public var id: String { entryKey }
+
+    public init(entryKey: String, label: String) {
+        self.entryKey = entryKey
+        self.label = label
+    }
+}
+
 public enum LocalAccountFailure: Error, Equatable, Sendable {
+    case entryRequired([LocalAccountEntry])
     case invalidInput
     case notSignedIn
     case duplicateAccount
@@ -72,7 +85,7 @@ public protocol AccountManaging: Sendable {
     func authorizeNativeSource(_ source: NativeSourcePermission) async throws
     /// Registers the read-only login a tool keeps in `configDirectory`, asking macOS for
     /// Keychain access when that login lives in the Keychain.
-    func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, label: String?) async throws
+    func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, entryKey: String?, label: String?) async throws
     func accountStorageProblem() async -> AccountStorageProblem?
     func authorizeAccountStorage() async throws
     func accounts() async -> [Account]
@@ -95,7 +108,7 @@ public extension AccountManaging {
     func nativeDiscoverySnapshot() async -> NativeDiscoverySnapshot { .init() }
     func accountStorageProblem() async -> AccountStorageProblem? { nil }
     func authorizeAccountStorage() async throws { throw NativeSourceAuthorizationFailure.unknown }
-    func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, label: String?) async throws {
+    func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, entryKey: String?, label: String?) async throws {
         throw LocalAccountFailure.unknown
     }
 }
