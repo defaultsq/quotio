@@ -4691,7 +4691,8 @@
           "kind": {"type": "string", "enum": ["grok_native", "copilot_native", "quotio_custom_provider", "codex_native", "claude_native", "kiro_native", "factory_native", "devin_desktop_native", "antigravity_native", "amp_native", "cursor_native"]},
           "location": {"type": ["string", "null"], "description": "One location supported by this kind's registration input. Required for Copilot inspection. Omit for kinds without locations."},
           "domain": {"type": ["string", "null"], "maxLength": 255, "pattern": "^(production|development|[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+)$", "description": "Required only for quotio_custom_provider; selected provider must be clinepass or zai."},
-          "inspect": {"type": "boolean", "default": false}
+          "inspect": {"type": "boolean", "default": false},
+          "config_dir": {"allOf": [{"$ref": "#/components/schemas/SourceConfigDirectory"}], "description": "grok_native only, with inspect true and no location. Lists each login in <config_dir>/auth.json as a registrable grok_native input with its entry_key, labelled by the login's email or username."}
         }
       },
       "DiscoveredSourceInput": {
@@ -4714,7 +4715,7 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 1024,
-        "description": "Existing directory used in place of the tool's default home, as its config_dir_env would name it. A leading ~ expands to the host home directory; the result must be absolute, without . or .. segments. Trailing slashes are removed. Credential file paths are derived by the server."
+        "description": "Existing directory used in place of the tool's default home, as its config_dir_env would name it. A leading ~ expands to the host home directory; the result must be absolute, without . or .. segments. The spelling is kept as given, because Claude Code hashes it verbatim. Credential file paths are derived by the server."
       },
       "AccountSourceInput": {
         "oneOf": [

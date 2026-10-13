@@ -745,42 +745,52 @@ impl GrokNativeReference {
     }
     /// `GROK_HOME`. Without an explicit entry, the file must hold exactly one login.
     pub fn in_config_dir(dir: &ConfigDir, entry_key: Option<String>) -> Result<Self, AccountError> {
-        let path = dir.join("auth.json");
         let entry_key = match entry_key {
             Some(key) => key,
-            None => {
-                let bytes = super::discovery::read_native(&path)?;
-                let value: serde_json::Value =
-                    serde_json::from_slice(&bytes).map_err(|_| AccountError::Corrupt)?;
-                let mut keys = value
-                    .as_object()
-                    .ok_or(AccountError::Corrupt)?
-                    .iter()
-                    .filter(|(_, entry)| entry.is_object())
-                    .map(|(key, _)| key.clone())
-                    .filter(|key| {
-                        Self {
-                            path: path.clone(),
-                            entry_key: key.clone(),
-                            config_dir: None,
-                        }
-                        .identity()
-                        .is_ok()
-                    });
-                match (keys.next(), keys.next()) {
-                    (Some(key), None) => key,
-                    (None, _) => return Err(AccountError::NotFound),
-                    (Some(_), Some(_)) => return Err(AccountError::Input),
-                }
-            }
+            None => match Self::entries_in(dir)?.as_slice() {
+                [(key, _)] => key.clone(),
+                [] => return Err(AccountError::NotFound),
+                _ => return Err(AccountError::EntryRequired),
+            },
         };
         let source = Self {
-            path,
+            path: dir.join("auth.json"),
             entry_key,
             config_dir: Some(dir.as_str().into()),
         };
         source.identity()?;
         Ok(source)
+    }
+    /// The logins in `<dir>/auth.json`, as `(entry_key, label)` pairs.
+    pub fn entries_in(dir: &ConfigDir) -> Result<Vec<(String, String)>, AccountError> {
+        let path = dir.join("auth.json");
+        let bytes = super::discovery::read_native(&path)?;
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|_| AccountError::Corrupt)?;
+        Ok(value
+            .as_object()
+            .ok_or(AccountError::Corrupt)?
+            .iter()
+            .filter(|(key, entry)| {
+                entry.is_object()
+                    && Self {
+                        path: path.clone(),
+                        entry_key: (*key).clone(),
+                        config_dir: None,
+                    }
+                    .identity()
+                    .is_ok()
+            })
+            .enumerate()
+            .map(|(index, (key, entry))| {
+                let label = ["email", "username"]
+                    .iter()
+                    .filter_map(|field| entry.get(*field).and_then(serde_json::Value::as_str))
+                    .find_map(|value| super::validate_label(value).ok())
+                    .unwrap_or_else(|| format!("Grok login {}", index + 1));
+                (key.clone(), label)
+            })
+            .collect())
     }
     pub fn identity(&self) -> Result<String, AccountError> {
         let key = &self.entry_key;
