@@ -95,9 +95,9 @@ struct AccountsSettingsScreen: View {
             case .localAccount(let provider):
                 if let descriptor = controller.providers.first(where: { $0.id == provider }),
                    let source = descriptor.configDirectorySource {
-                    LocalAccountConnectionSheet(provider: provider, providerName: descriptor.displayName, source: source) { label, directory in
+                    LocalAccountConnectionSheet(provider: provider, providerName: descriptor.displayName, source: source) { label, directory, entryKey in
                         try await accounts.addLocalAccount(provider: provider, kind: source.kind,
-                            configDirectory: directory, label: label)
+                            configDirectory: directory, entryKey: entryKey, label: label)
                         await controller.refresh(provider: provider)
                     }
                 }

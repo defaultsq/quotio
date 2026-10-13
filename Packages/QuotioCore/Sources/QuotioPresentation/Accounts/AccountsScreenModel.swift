@@ -74,9 +74,10 @@ public final class AccountsScreenModel {
         await reloadAccounts()
     }
 
-    public func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, label: String?) async throws {
+    public func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, entryKey: String?, label: String?) async throws {
         do {
-            try await accountService.addLocalAccount(provider: provider, kind: kind, configDirectory: configDirectory, label: label)
+            try await accountService.addLocalAccount(provider: provider, kind: kind, configDirectory: configDirectory,
+                entryKey: entryKey, label: label)
         } catch {
             storageProblem = await accountService.accountStorageProblem()
             throw error

@@ -9,11 +9,13 @@ struct LocalAccountConnectionSheet: View {
     let provider: QuotaProvider
     let providerName: String
     let source: MonitoringProvider.ConfigDirectorySource
-    let onSave: (_ label: String?, _ directory: String) async throws -> Void
+    let onSave: (_ label: String?, _ directory: String, _ entryKey: String?) async throws -> Void
 
     @State private var label = ""
     @State private var directory = ""
     @State private var choosingFolder = false
+    @State private var entries: [LocalAccountEntry] = []
+    @State private var entryKey: String?
     @State private var errorMessage: String?
     @State private var isSaving = false
 
@@ -61,6 +63,14 @@ struct LocalAccountConnectionSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if !entries.isEmpty {
+                    Picker("settings.localAccount.login".localized(), selection: $entryKey) {
+                        ForEach(entries) { entry in
+                            Text(entry.label).tag(Optional(entry.entryKey))
+                        }
+                    }
+                }
+
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.caption)
@@ -83,10 +93,14 @@ struct LocalAccountConnectionSheet: View {
             }
             .padding(20)
         }
-        .frame(width: 450, height: 400)
+        .frame(width: 450, height: entries.isEmpty ? 400 : 460)
         .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
             guard case .success(let url) = result else { return }
             directory = Self.abbreviatingHome(url.path)
+        }
+        .onChange(of: directory) { _, _ in
+            entries = []
+            entryKey = nil
         }
     }
 
@@ -107,8 +121,12 @@ struct LocalAccountConnectionSheet: View {
         errorMessage = nil
         let name = label.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            try await onSave(name.isEmpty ? nil : name, trimmedDirectory)
+            try await onSave(name.isEmpty ? nil : name, trimmedDirectory, entryKey)
             dismiss()
+        } catch LocalAccountFailure.entryRequired(let found) {
+            entries = found
+            entryKey = found.first?.entryKey
+            errorMessage = "settings.localAccount.chooseLogin".localized()
         } catch let failure as LocalAccountFailure {
             errorMessage = failure.message
         } catch {
@@ -121,6 +139,7 @@ struct LocalAccountConnectionSheet: View {
 extension LocalAccountFailure {
     var message: String {
         let key: String = switch self {
+        case .entryRequired: "settings.localAccount.chooseLogin"
         case .invalidInput: "settings.localAccount.failure.invalidInput"
         case .notSignedIn: "settings.localAccount.failure.notSignedIn"
         case .duplicateAccount: "settings.localAccount.failure.duplicate"

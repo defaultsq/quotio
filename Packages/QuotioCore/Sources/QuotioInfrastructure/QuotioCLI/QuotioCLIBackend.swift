@@ -25,7 +25,22 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
     private struct LocalSourceBody: Encodable {
         let kind: String
         let configDir: String
+        let entryKey: String?
         let label: String?
+    }
+    private struct LocalEntryDiscoveryBody: Encodable {
+        let provider: String
+        let kind: String
+        let configDir: String
+        let inspect = true
+    }
+    private struct LocalEntryDiscovery: Decodable, Sendable {
+        struct Candidate: Decodable, Sendable {
+            struct Source: Decodable, Sendable { let entryKey: String }
+            let label: String
+            let source: Source
+        }
+        let candidates: [Candidate]
     }
     public private(set) var snapshot = QuotaSnapshot()
     private var client: QuotioHostHTTPClient?
@@ -312,10 +327,11 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         await discoverNativeAccounts(providerID: source.provider.rawValue)
     }
 
-    public func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, label: String?) async throws {
+    public func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, entryKey: String?, label: String?) async throws {
         guard let client else { throw LocalAccountFailure.unknown }
         // Claude Code NFC-normalizes CLAUDE_CONFIG_DIR before hashing it into its Keychain service.
-        let body = try JSONEncoder.quotioCLI.encode(LocalSourceBody(kind: kind, configDir: configDirectory.precomposedStringWithCanonicalMapping, label: label))
+        let directory = configDirectory.precomposedStringWithCanonicalMapping
+        let body = try JSONEncoder.quotioCLI.encode(LocalSourceBody(kind: kind, configDir: directory, entryKey: entryKey, label: label))
         do {
             do {
                 try await mutate(client: client, path: "v2/sources", method: "POST", body: body)
@@ -329,6 +345,18 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
                     timeout: .seconds(300)
                 )
             }
+        } catch QuotioHostClientError.response(_, "entry_required") {
+            let body = try JSONEncoder.quotioCLI.encode(
+                LocalEntryDiscoveryBody(provider: provider.rawValue, kind: kind, configDir: directory))
+            let discovery: LocalEntryDiscovery
+            do {
+                discovery = try await client.request("v2/sources/discover", method: "POST", body: body)
+            } catch {
+                throw Self.localAccountFailure(error)
+            }
+            throw LocalAccountFailure.entryRequired(discovery.candidates.map {
+                LocalAccountEntry(entryKey: $0.source.entryKey, label: $0.label)
+            })
         } catch {
             if let problem = Self.storageProblem(error) { storageProblem = problem }
             throw Self.localAccountFailure(error)
