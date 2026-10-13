@@ -1268,7 +1268,7 @@ async fn config_dir_sources_child() {
     assert_eq!(work["sources"][0]["kind"], "codex_native");
     assert_eq!(
         work["sources"][0]["directory"],
-        format!("{home}/.codex-work")
+        format!("{home}/.codex-work/")
     );
     let claude: Value = account(ids[2].clone()).await.json().await.unwrap();
     assert_eq!(claude["sources"][0]["location"], "code_file");
