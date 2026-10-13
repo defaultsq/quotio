@@ -21,6 +21,7 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         let kind: String
         let location: String?
         let entryKey: String?
+        let configDir: String?
     }
     private struct LocalSourceBody: Encodable {
         let kind: String
@@ -296,7 +297,8 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
 
     public func authorizeNativeSource(_ source: NativeSourcePermission) async throws {
         guard let client else { throw QuotioHostClientError.disconnected }
-        let body = try JSONEncoder.quotioCLI.encode(NativeSourceBody(kind: source.kind, location: source.location, entryKey: source.keychainAccount))
+        let body = try JSONEncoder.quotioCLI.encode(NativeSourceBody(kind: source.kind, location: source.location,
+            entryKey: source.keychainAccount, configDir: source.configDirectory))
         do {
             try await mutate(
                 client: client,

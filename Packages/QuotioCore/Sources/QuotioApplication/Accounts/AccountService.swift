@@ -52,15 +52,20 @@ public struct NativeSourcePermission: Codable, Hashable, Identifiable, Sendable 
     public let kind: String
     public let location: String?
     public let keychainAccount: String?
+    public let configDirectory: String?
 
-    public init(provider: QuotaProvider, kind: String, location: String?, keychainAccount: String? = nil) {
+    public init(provider: QuotaProvider, kind: String, location: String?, keychainAccount: String? = nil,
+                configDirectory: String? = nil) {
         self.provider = provider
         self.kind = kind
         self.location = location
         self.keychainAccount = keychainAccount
+        self.configDirectory = configDirectory
     }
 
-    public var id: String { provider.rawValue + ":" + kind + ":" + (location ?? "") + ":" + (keychainAccount ?? "") }
+    public var id: String {
+        provider.rawValue + ":" + kind + ":" + (location ?? "") + ":" + (keychainAccount ?? "") + ":" + (configDirectory ?? "")
+    }
 }
 
 public struct NativeDiscoverySnapshot: Sendable {
