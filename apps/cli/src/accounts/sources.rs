@@ -4,22 +4,24 @@ use serde::{Deserialize, Serialize};
 
 /// An existing directory chosen in place of a tool's default home, such as
 /// `CLAUDE_CONFIG_DIR`. `~` is expanded the way a shell expands the exported
-/// value, so `as_str` is the string the tool itself sees.
+/// value, so `as_str` is the string the tool itself sees. The spelling is kept
+/// as is: Claude Code hashes it verbatim, trailing slash included.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConfigDir(std::path::PathBuf);
+pub struct ConfigDir(String);
 impl ConfigDir {
     pub fn parse(raw: &str) -> Result<Self, AccountError> {
         let expanded = match raw.strip_prefix('~') {
             Some(rest) if rest.is_empty() || rest.starts_with('/') => {
-                let home = std::env::var_os("HOME").ok_or(AccountError::NotFound)?;
-                std::path::PathBuf::from(home).join(rest.trim_start_matches('/'))
+                let home = std::env::var("HOME").map_err(|_| AccountError::NotFound)?;
+                format!("{home}{rest}")
             }
             Some(_) => return Err(AccountError::Input),
-            None => std::path::PathBuf::from(raw),
+            None => raw.to_owned(),
         };
+        let path = std::path::Path::new(&expanded);
         if raw.len() > 1024
-            || !expanded.is_absolute()
-            || expanded.components().any(|c| {
+            || !path.is_absolute()
+            || path.components().any(|c| {
                 matches!(
                     c,
                     std::path::Component::ParentDir | std::path::Component::CurDir
@@ -28,18 +30,16 @@ impl ConfigDir {
         {
             return Err(AccountError::Input);
         }
-        let path: std::path::PathBuf = expanded.components().collect();
-        path.to_str().ok_or(AccountError::Input)?;
         if !path.is_dir() {
             return Err(AccountError::NotFound);
         }
-        Ok(Self(path))
+        Ok(Self(expanded))
     }
     pub fn as_str(&self) -> &str {
-        self.0.to_str().expect("validated as UTF-8")
+        &self.0
     }
     pub fn join(&self, file: &str) -> std::path::PathBuf {
-        self.0.join(file)
+        std::path::Path::new(&self.0).join(file)
     }
 }
 impl<'de> Deserialize<'de> for ConfigDir {
@@ -1470,7 +1470,7 @@ mod tests {
         )
         .unwrap();
         let config = ConfigDir::parse(&format!("{}/", dir.display())).unwrap();
-        assert_eq!(config.as_str(), dir.to_str().unwrap());
+        assert_eq!(config.as_str(), format!("{}/", dir.display()));
         let file = ClaudeNativeReference::in_config_dir(&config, ClaudeLocation::CodeFile).unwrap();
         assert_eq!(file.path.as_deref(), Some(&*dir.join(".credentials.json")));
         assert_eq!(file.metadata_path(), Some(dir.join(".claude.json")));
@@ -1491,6 +1491,10 @@ mod tests {
                 ClaudeNativeReference::in_config_dir(&config, ClaudeLocation::CodeKeychain)
                     .unwrap();
             assert_eq!(
+                keychain.keychain_service(),
+                claude_keychain_service(Some(&format!("{}/", dir.display())))
+            );
+            assert_ne!(
                 keychain.keychain_service(),
                 claude_keychain_service(Some(dir.to_str().unwrap()))
             );
