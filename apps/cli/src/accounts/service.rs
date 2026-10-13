@@ -173,9 +173,10 @@ async fn validate_with_endpoint(
             claude_reference_login, fetch_claude_native,
         };
         source.identity()?;
-        let login = claude_reference_login(source.path.clone()).await?;
-        let usage = fetch_claude_native(context, &login, endpoint_override).await?;
-        if login != claude_reference_login(source.path.clone()).await? {
+        let login = claude_reference_login(source).await?;
+        let usage =
+            fetch_claude_native(context, &login, source.metadata_path(), endpoint_override).await?;
+        if login != claude_reference_login(source).await? {
             return Err(AccountError::Busy);
         }
         if !crate::fetch::valid_usage(&usage) {
@@ -1522,10 +1523,12 @@ pub(crate) fn native_reference_replaces_local(provider: Provider, credential: &C
         Credential::CopilotNative { .. } => {
             provider == Provider::Catalog("copilot")
                 && std::env::var_os("COPILOT_API_TOKEN").is_none()
+                && credential.config_directory().is_none()
         }
         Credential::ClaudeNative { .. } => {
             provider == Provider::Catalog("claude")
                 && std::env::var_os("CLAUDE_OAUTH_ACCESS_TOKEN").is_none()
+                && credential.config_directory().is_none()
         }
         Credential::CodexNative { source } => {
             provider == Provider::Codex
@@ -1540,7 +1543,9 @@ pub(crate) fn native_reference_replaces_local(provider: Provider, credential: &C
         }
         Credential::AmpNative { .. } => provider == Provider::Amp && uses_native_amp_source(),
         Credential::GrokNative { .. } => {
-            provider == Provider::Catalog("grok") && std::env::var_os("GROK_OAUTH_TOKEN").is_none()
+            provider == Provider::Catalog("grok")
+                && std::env::var_os("GROK_OAUTH_TOKEN").is_none()
+                && credential.config_directory().is_none()
         }
         Credential::CursorNative { .. } => {
             provider == Provider::Catalog("cursor")
@@ -1877,6 +1882,7 @@ mod tests {
         let memory = Arc::new(Memory::default());
         let vault = Vault::new(memory.clone(), dir.join("lock"));
         let source = super::super::sources::CopilotNativeReference {
+            config_dir: None,
             location: super::super::sources::CopilotLocation::GhKeychain,
             path: None,
             entry_key: "github.com".into(),
@@ -1951,6 +1957,7 @@ mod tests {
         let dir = std::env::temp_dir().join(random_string().unwrap());
         let vault = Vault::new(Arc::new(Memory::default()), dir.join("lock"));
         let source = super::super::sources::CodexNativeReference {
+            config_dir: None,
             path: dir.join("auth.json"),
         };
         let id = add(
@@ -1998,6 +2005,7 @@ mod tests {
             Err(AccountError::SourceDisabled)
         ));
         let other = super::super::sources::CodexNativeReference {
+            config_dir: None,
             path: dir.join("other/auth.json"),
         };
         let other_id = add(
@@ -2520,6 +2528,7 @@ mod tests {
                     source: super::super::sources::ClaudeNativeReference {
                         location: super::super::sources::ClaudeLocation::CodeFile,
                         path: Some(missing.clone()),
+                        config_dir: None,
                     },
                 },
             ),
@@ -2528,6 +2537,7 @@ mod tests {
                 "COPILOT_API_TOKEN",
                 Credential::CopilotNative {
                     source: super::super::sources::CopilotNativeReference {
+                        config_dir: None,
                         location: super::super::sources::CopilotLocation::Apps,
                         path: Some(missing.clone()),
                         entry_key: "github.com:fixture".into(),
@@ -2991,6 +3001,7 @@ mod tests {
             std::fs::write(&path, original).unwrap();
             let credential = Credential::CopilotNative {
                 source: super::super::sources::CopilotNativeReference {
+                    config_dir: None,
                     location: super::super::sources::CopilotLocation::Apps,
                     path: Some(path.clone()),
                     entry_key: "github.com:fixture".into(),
@@ -3056,6 +3067,7 @@ mod tests {
             source: super::super::sources::ClaudeNativeReference {
                 location: super::super::sources::ClaudeLocation::CodeFile,
                 path: Some(path.clone()),
+                config_dir: None,
             },
         };
         for (status, profile, expected_plan, code) in [
@@ -3228,6 +3240,7 @@ mod tests {
                 source: super::super::sources::ClaudeNativeReference {
                     location: super::super::sources::ClaudeLocation::CodeFile,
                     path: Some(path.clone()),
+                    config_dir: None,
                 },
             };
             let provider = Provider::Catalog("claude");
@@ -3342,7 +3355,10 @@ mod tests {
             let original = br#"{"tokens":{"access_token":"native-first-fixture","account_id":"fixture-account","refresh_token":"owner-only"}}"#;
             std::fs::write(&path, original).unwrap();
             let credential = Credential::CodexNative {
-                source: super::super::sources::CodexNativeReference { path: path.clone() },
+                source: super::super::sources::CodexNativeReference {
+                    config_dir: None,
+                    path: path.clone(),
+                },
             };
             let vault = Vault::new(Arc::new(Memory::default()), dir.join("lock"));
             let mut tx = vault.begin().unwrap();
@@ -3585,6 +3601,7 @@ mod tests {
             });
             std::fs::write(&path, data.to_string()).unwrap();
             let source = super::super::sources::GrokNativeReference {
+                config_dir: None,
                 path: path.clone(),
                 entry_key: "https://auth.x.ai::first".into(),
             };

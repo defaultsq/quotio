@@ -463,6 +463,7 @@ impl Registry {
                 .is_some();
             return Ok(if present {
                 vec![Reference::Copilot(CopilotNativeReference {
+                    config_dir: None,
                     path: Some(path),
                     entry_key: "github.com".into(),
                     location: CopilotLocation::GhHosts,
@@ -483,6 +484,7 @@ impl Registry {
             }
             if kind == "grok_native" {
                 let source = GrokNativeReference {
+                    config_dir: None,
                     path: path.clone(),
                     entry_key: key.clone(),
                 };
@@ -491,6 +493,7 @@ impl Registry {
                 }
             } else {
                 let source = CopilotNativeReference {
+                    config_dir: None,
                     path: Some(path.clone()),
                     entry_key: key.clone(),
                     location: if location == Some("apps") {
@@ -581,7 +584,7 @@ fn native_file_exists(path: &Path) -> bool {
         .is_ok_and(|metadata| metadata.is_file())
 }
 
-fn read_native(path: &Path) -> Result<Vec<u8>, AccountError> {
+pub(super) fn read_native(path: &Path) -> Result<Vec<u8>, AccountError> {
     use std::io::Read;
     let file = open_native(path)?;
     let metadata = file.metadata().map_err(|_| AccountError::Storage)?;
@@ -624,6 +627,7 @@ mod tests {
         assert_eq!(discovered["status"], "checked");
         assert_eq!(discovered["candidates"].as_array().unwrap().len(), 1);
         let source = CodexNativeReference {
+            config_dir: None,
             path: home.join(".codex/auth.json"),
         };
         let resolved = source.resolve().await.unwrap();
@@ -997,6 +1001,7 @@ mod tests {
     #[test]
     fn discovery_references_expire_and_are_bounded() {
         let source = Reference::Grok(GrokNativeReference {
+            config_dir: None,
             path: PathBuf::from("/fixture/auth.json"),
             entry_key: "https://auth.x.ai::fixture".into(),
         });

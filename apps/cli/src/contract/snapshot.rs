@@ -65,6 +65,7 @@ fn external_source(id: String, reference: Option<&AccountRef>) -> Source {
         .into(),
         location: None,
         keychain_account: None,
+        directory: None,
         enabled: true,
         selected: false,
         state: ConnectionState::NotChecked,

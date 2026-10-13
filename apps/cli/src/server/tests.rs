@@ -794,6 +794,7 @@ async fn grok_local_alias_child() {
     state.settings.write().await.values.enabled_providers = vec!["grok".into()];
     // Deliberately absent: rejection must not resolve the native credential.
     let source = accounts::sources::GrokNativeReference {
+        config_dir: None,
         path: dir.join("missing-auth.json"),
         entry_key: "https://auth.x.ai::fixture".into(),
     };
@@ -1075,6 +1076,227 @@ async fn codex_source_rest_child() {
             .unwrap()
             .status(),
         404
+    );
+    server.abort();
+    for job in state.jobs.lock().unwrap().drain(..) {
+        job.abort();
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+#[test]
+fn config_dir_sources_run_with_an_isolated_home() {
+    let dir = std::env::temp_dir().join(accounts::random_string().unwrap());
+    let fixtures = [
+        (
+            ".codex-work/auth.json",
+            r#"{"tokens":{"access_token":"synthetic-work-secret","account_id":"work-id"}}"#,
+        ),
+        (
+            ".codex-other/auth.json",
+            r#"{"tokens":{"access_token":"synthetic-other-secret","account_id":"other-id"}}"#,
+        ),
+        (
+            ".claude-work/.credentials.json",
+            r#"{"claudeAiOauth":{"accessToken":"synthetic-claude-secret","refreshToken":"owner-refresh"}}"#,
+        ),
+        ("not-a-dir", "file"),
+    ];
+    for (relative, bytes) in fixtures {
+        let path = dir.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "server::tests::config_dir_sources_child",
+            "--nocapture",
+        ])
+        .env("HOME", &dir)
+        .env("QUOTIO_CONFIG_DIR_FIXTURE", &dir)
+        .env_remove("CODEX_HOME")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for (relative, bytes) in fixtures {
+        assert_eq!(std::fs::read(dir.join(relative)).unwrap(), bytes.as_bytes());
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+#[tokio::test]
+async fn config_dir_sources_child() {
+    let Ok(home) = std::env::var("QUOTIO_CONFIG_DIR_FIXTURE") else {
+        return;
+    };
+    assert_eq!(std::env::var("HOME").unwrap(), home);
+    let (mut state, dir, _) = fixture().await;
+    Arc::get_mut(&mut state).unwrap().no_saved_accounts = false;
+    state.settings.write().await.values.enabled_providers = vec!["codex".into(), "claude".into()];
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let token = "synthetic-management-token-1234567890";
+    let app = router(
+        state.clone(),
+        Arc::new(security::Policy::new(address, true, None, &[], Some(token.into())).unwrap()),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let base = format!("http://{address}");
+    let post = |key: String, body: Value| {
+        client
+            .post(format!("{base}/v2/sources"))
+            .bearer_auth(token)
+            .header("Idempotency-Key", key)
+            .json(&body)
+            .send()
+    };
+    for (index, input) in [
+        json!({"kind":"codex_native","config_dir":".codex-work"}),
+        json!({"kind":"codex_native","config_dir":"~/../.codex-work"}),
+        json!({"kind":"codex_native","config_dir":"~/missing"}),
+        json!({"kind":"codex_native","config_dir":"~/not-a-dir"}),
+        json!({"kind":"codex_native","config_dir":"~other/.codex-work"}),
+        json!({"kind":"codex_native","location":"config","config_dir":"~/.codex-work"}),
+        json!({"kind":"codex_native","config_dir":"~/.codex-work","path":"/tmp/untrusted"}),
+        json!({"kind":"codex_native","path":format!("{home}/.codex-work/auth.json")}),
+        json!({"kind":"claude_native","config_dir":"~/.claude-work","path":"/tmp/untrusted"}),
+        json!({"kind":"claude_native","config_dir":"~/.claude-work","label":""}),
+        json!({"kind":"copilot_native","location":"apps","config_dir":"~/.codex-work"}),
+        json!({"kind":"amp_native","config_dir":"~/.codex-work"}),
+        json!({"kind":"cursor_native","config_dir":"~/.codex-work"}),
+        json!({"kind":"kiro_native","config_dir":"~/.codex-work"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let response = post(format!("invalid-config-dir-{index}"), input.clone())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400, "{input}");
+    }
+    for capability in crate::providers::capabilities::all() {
+        for source in capability.source_references {
+            if source.config_dir_env.is_some() {
+                let response = post(
+                    format!("accepted-config-dir-{}", source.kind),
+                    json!({"kind":source.kind,"config_dir":"~/.codex-work"}),
+                )
+                .await
+                .unwrap();
+                assert_eq!(response.status(), 202, "{}", source.kind);
+                let operation: Value = response.json().await.unwrap();
+                done(&state, operation["id"].as_str().unwrap()).await;
+            }
+        }
+    }
+    let vault = state.vault.as_ref().unwrap();
+    let registered: Vec<_> = vault
+        .begin()
+        .unwrap()
+        .document
+        .accounts
+        .iter()
+        .map(|account| account.id.clone())
+        .collect();
+    for id in registered {
+        let mut tx = vault.begin().unwrap();
+        tx.document.remove(&id).unwrap();
+        tx.commit().unwrap();
+    }
+    let mut ids = Vec::new();
+    for (key, input) in [
+        (
+            "work",
+            json!({"kind":"codex_native","config_dir":"~/.codex-work/","label":"Work Codex"}),
+        ),
+        (
+            "other",
+            json!({"kind":"codex_native","config_dir":format!("{home}/.codex-other")}),
+        ),
+        (
+            "claude",
+            json!({"kind":"claude_native","config_dir":"~/.claude-work"}),
+        ),
+    ] {
+        let response = post(key.into(), input).await.unwrap();
+        assert_eq!(response.status(), 202);
+        let operation: Value = response.json().await.unwrap();
+        let completed =
+            serde_json::to_value(done(&state, operation["id"].as_str().unwrap()).await).unwrap();
+        assert_eq!(completed["status"], "completed", "{completed}");
+        assert!(!completed.to_string().contains("synthetic-"));
+        ids.push(
+            completed["result"]["account_id"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        );
+    }
+    let account = |id: String| {
+        let request = client
+            .get(format!("{base}/v2/accounts/{id}"))
+            .bearer_auth(token);
+        async move { request.send().await.unwrap() }
+    };
+    let work: Value = account(ids[0].clone()).await.json().await.unwrap();
+    assert_eq!(work["display_name"], "Work Codex");
+    assert_eq!(work["sources"][0]["kind"], "codex_native");
+    assert_eq!(
+        work["sources"][0]["directory"],
+        format!("{home}/.codex-work")
+    );
+    let claude: Value = account(ids[2].clone()).await.json().await.unwrap();
+    assert_eq!(claude["sources"][0]["location"], "code_file");
+    assert_eq!(
+        claude["sources"][0]["directory"],
+        format!("{home}/.claude-work")
+    );
+    assert!(!claude.to_string().contains("synthetic-"));
+    let document = vault.begin().unwrap().document;
+    assert_eq!(document.version, 22);
+    let codex_paths: Vec<_> = document
+        .accounts
+        .iter()
+        .filter_map(|account| match &account.credential {
+            accounts::Credential::CodexNative { source } => Some(source.path.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        codex_paths,
+        [".codex-work/auth.json", ".codex-other/auth.json"]
+            .map(|file| { std::path::Path::new(&home).join(file) })
+    );
+    let response: Value = client
+        .delete(format!("{base}/v2/accounts/{}", ids[0]))
+        .bearer_auth(token)
+        .header("Idempotency-Key", "remove-work")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        done(&state, response["id"].as_str().unwrap()).await.status,
+        "completed"
+    );
+    assert_eq!(account(ids[0].clone()).await.status(), 404);
+    assert_eq!(account(ids[1].clone()).await.status(), 200);
+    let document = vault.begin().unwrap().document;
+    assert!(
+        document
+            .resolved
+            .is_none_or(|registry| registry.suppressed_providers().is_empty())
     );
     server.abort();
     for job in state.jobs.lock().unwrap().drain(..) {

@@ -367,6 +367,7 @@ impl Registry {
                             kind: metadata.source_kind.unwrap_or("owned_credential").into(),
                             location: metadata.source_location,
                             keychain_account: record.keychain_account().map(str::to_owned),
+                            directory: metadata.source_directory,
                             enabled: record.enabled(),
                             selected: false,
                             state: if record.enabled() {

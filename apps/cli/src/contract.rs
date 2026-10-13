@@ -95,6 +95,9 @@ pub struct Source {
     pub location: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keychain_account: Option<String>,
+    /// User-chosen config directory, such as `CLAUDE_CONFIG_DIR`. Never a credential path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
     pub enabled: bool,
     pub selected: bool,
     pub state: ConnectionState,

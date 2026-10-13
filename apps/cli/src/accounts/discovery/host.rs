@@ -248,7 +248,9 @@ impl Report {
                 continue;
             }
             let metadata = api::AccountDto::from(account);
-            if let Some(kind) = metadata.source_kind {
+            if let Some(kind) = metadata.source_kind
+                && metadata.source_directory.is_none()
+            {
                 let permission = Permission {
                     provider: account.provider,
                     kind: kind.into(),
@@ -327,6 +329,7 @@ mod tests {
                     source: ClaudeNativeReference {
                         location: ClaudeLocation::CodeFile,
                         path: None,
+                        config_dir: None,
                     },
                 },
             )
@@ -352,6 +355,7 @@ mod tests {
                     source: ClaudeNativeReference {
                         location: ClaudeLocation::CodeKeychain,
                         path: None,
+                        config_dir: None,
                     },
                 },
             )

@@ -20,6 +20,8 @@ pub struct AccountDto {
     pub source_location: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_directory: Option<String>,
 }
 impl From<&super::Account> for AccountDto {
     fn from(account: &super::Account) -> Self {
@@ -59,6 +61,7 @@ impl From<&super::Account> for AccountDto {
             .and_then(|value| value.as_str().map(str::to_owned)),
             source_id: matches!(account.credential, Credential::QuotioCustomProvider { .. })
                 .then(|| account.identity.clone()),
+            source_directory: account.credential.config_directory(),
         }
     }
 }
@@ -410,19 +413,38 @@ pub enum SourceInput {
         entry_key: Option<String>,
     },
     CopilotNative {
-        location: super::sources::CopilotLocation,
+        #[serde(default)]
+        location: Option<super::sources::CopilotLocation>,
         #[serde(default)]
         entry_key: String,
+        #[serde(default)]
+        config_dir: Option<super::sources::ConfigDir>,
+        #[serde(default)]
+        label: Option<String>,
     },
     ClaudeNative {
-        location: super::sources::ClaudeLocation,
+        #[serde(default)]
+        location: Option<super::sources::ClaudeLocation>,
+        #[serde(default)]
+        config_dir: Option<super::sources::ConfigDir>,
+        #[serde(default)]
+        label: Option<String>,
     },
     CodexNative {
         #[serde(default)]
         location: super::sources::CodexLocation,
+        #[serde(default)]
+        config_dir: Option<super::sources::ConfigDir>,
+        #[serde(default)]
+        label: Option<String>,
     },
     GrokNative {
-        entry_key: String,
+        #[serde(default)]
+        entry_key: Option<String>,
+        #[serde(default)]
+        config_dir: Option<super::sources::ConfigDir>,
+        #[serde(default)]
+        label: Option<String>,
     },
     CursorNative {},
     AmpNative {},
@@ -430,7 +452,89 @@ pub enum SourceInput {
         source: super::sources::CustomProviderReference,
     },
 }
+impl SourceInput {
+    /// Rejects selector combinations at the API boundary. A config directory replaces
+    /// the fixed location selectors, so the two never combine.
+    pub fn check(&self) -> Result<(), AccountError> {
+        use super::sources::{CodexLocation, CopilotLocation};
+        let (valid, label) = match self {
+            Self::CopilotNative {
+                location,
+                entry_key,
+                config_dir,
+                label,
+            } => (
+                match config_dir {
+                    None => location.is_some(),
+                    Some(_) => {
+                        matches!(location, None | Some(CopilotLocation::GhHosts))
+                            && matches!(entry_key.as_str(), "" | "github.com")
+                    }
+                },
+                label,
+            ),
+            Self::ClaudeNative {
+                location,
+                config_dir,
+                label,
+            } => (location.is_some() || config_dir.is_some(), label),
+            Self::CodexNative {
+                location,
+                config_dir,
+                label,
+            } => (
+                config_dir.is_none() || *location == CodexLocation::Default,
+                label,
+            ),
+            Self::GrokNative {
+                entry_key,
+                config_dir,
+                label,
+            } => (entry_key.is_some() || config_dir.is_some(), label),
+            _ => (true, &None),
+        };
+        if !valid {
+            return Err(AccountError::Input);
+        }
+        if let Some(label) = label {
+            super::validate_label(label)?;
+        }
+        Ok(())
+    }
+    pub fn config_dir(&self) -> Option<&super::sources::ConfigDir> {
+        match self {
+            Self::CopilotNative { config_dir, .. }
+            | Self::ClaudeNative { config_dir, .. }
+            | Self::CodexNative { config_dir, .. }
+            | Self::GrokNative { config_dir, .. } => config_dir.as_ref(),
+            _ => None,
+        }
+    }
+    fn label(&self) -> Option<&str> {
+        match self {
+            Self::CopilotNative { label, .. }
+            | Self::ClaudeNative { label, .. }
+            | Self::CodexNative { label, .. }
+            | Self::GrokNative { label, .. } => label.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+/// Picks where Claude Code keeps credentials for a config directory: the file when
+/// present, otherwise the directory's own Keychain item.
+fn claude_location_in(dir: &super::sources::ConfigDir) -> super::sources::ClaudeLocation {
+    if dir.join(".credentials.json").exists() || !cfg!(target_os = "macos") {
+        super::sources::ClaudeLocation::CodeFile
+    } else {
+        super::sources::ClaudeLocation::CodeKeychain
+    }
+}
+
 pub async fn prepare_source(input: SourceInput) -> Result<PreparedAccount, AccountError> {
+    input.check()?;
+    let user_label = input.label().map(str::to_owned);
+    let directory = input.config_dir().map(|dir| dir.as_str().to_owned());
     let (identity, credential, resolved) = match input {
         SourceInput::Discovered { .. } => return Err(AccountError::Input),
         SourceInput::AntigravityNative { location } => {
@@ -476,15 +580,23 @@ pub async fn prepare_source(input: SourceInput) -> Result<PreparedAccount, Accou
         SourceInput::CopilotNative {
             location,
             entry_key,
+            config_dir,
+            ..
         } => {
-            let entry_key = if (entry_key.is_empty() || entry_key == "github.com")
-                && location == super::sources::CopilotLocation::GhKeychain
-            {
-                crate::providers::catalog::oauth_primary::copilot_keychain_account().await?
-            } else {
-                entry_key
+            let source = match (config_dir, location) {
+                (Some(dir), _) => super::sources::CopilotNativeReference::in_config_dir(&dir)?,
+                (None, Some(location)) => {
+                    let entry_key = if (entry_key.is_empty() || entry_key == "github.com")
+                        && location == super::sources::CopilotLocation::GhKeychain
+                    {
+                        crate::providers::catalog::oauth_primary::copilot_keychain_account().await?
+                    } else {
+                        entry_key
+                    };
+                    super::sources::CopilotNativeReference::system(location, entry_key)?
+                }
+                (None, None) => return Err(AccountError::Input),
             };
-            let source = super::sources::CopilotNativeReference::system(location, entry_key)?;
             let resolved = source.resolve().await?;
             (
                 source.identity()?,
@@ -492,8 +604,19 @@ pub async fn prepare_source(input: SourceInput) -> Result<PreparedAccount, Accou
                 resolved,
             )
         }
-        SourceInput::ClaudeNative { location } => {
-            let source = super::sources::ClaudeNativeReference::system(location)?;
+        SourceInput::ClaudeNative {
+            location,
+            config_dir,
+            ..
+        } => {
+            let source = match (config_dir, location) {
+                (Some(dir), location) => super::sources::ClaudeNativeReference::in_config_dir(
+                    &dir,
+                    location.unwrap_or_else(|| claude_location_in(&dir)),
+                )?,
+                (None, Some(location)) => super::sources::ClaudeNativeReference::system(location)?,
+                (None, None) => return Err(AccountError::Input),
+            };
             let resolved = source.resolve().await?;
             (
                 source.identity()?,
@@ -501,8 +624,15 @@ pub async fn prepare_source(input: SourceInput) -> Result<PreparedAccount, Accou
                 resolved,
             )
         }
-        SourceInput::CodexNative { location } => {
-            let source = super::sources::CodexNativeReference::system(location)?;
+        SourceInput::CodexNative {
+            location,
+            config_dir,
+            ..
+        } => {
+            let source = match config_dir {
+                Some(dir) => super::sources::CodexNativeReference::in_config_dir(&dir)?,
+                None => super::sources::CodexNativeReference::system(location)?,
+            };
             let resolved = source.resolve().await?;
             (
                 source.identity()?,
@@ -518,8 +648,20 @@ pub async fn prepare_source(input: SourceInput) -> Result<PreparedAccount, Accou
                 resolved,
             )
         }
-        SourceInput::GrokNative { entry_key } => {
-            let source = super::sources::GrokNativeReference::system(entry_key)?;
+        SourceInput::GrokNative {
+            entry_key,
+            config_dir,
+            ..
+        } => {
+            let source = match (config_dir, entry_key) {
+                (Some(dir), entry_key) => tokio::task::spawn_blocking(move || {
+                    super::sources::GrokNativeReference::in_config_dir(&dir, entry_key)
+                })
+                .await
+                .map_err(|_| AccountError::Storage)??,
+                (None, Some(entry_key)) => super::sources::GrokNativeReference::system(entry_key)?,
+                (None, None) => return Err(AccountError::Input),
+            };
             let resolved = source.resolve().await?;
             (
                 source.identity()?,
@@ -547,10 +689,32 @@ pub async fn prepare_source(input: SourceInput) -> Result<PreparedAccount, Accou
         }
     };
     let provider = resolved.provider;
+    if let Some(label) = user_label {
+        return Ok(PreparedAccount {
+            name_origin: Some(LabelOrigin::User),
+            provider,
+            label,
+            identity,
+            credential,
+        });
+    }
     let label = if provider == Provider::Catalog("cursor")
         && super::validate_label(&resolved.label).is_err()
     {
         "Local Cursor account".into()
+    } else if let Some(directory) = directory {
+        // Generated names must differ per directory; the account label is unique per provider.
+        let name: String = std::path::Path::new(&directory)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&directory)
+            .chars()
+            .take(40)
+            .collect();
+        format!(
+            "{} ({name})",
+            resolved.label.chars().take(36).collect::<String>()
+        )
     } else {
         resolved.label
     };
@@ -1093,6 +1257,7 @@ mod tests {
                 source: super::super::sources::ClaudeNativeReference {
                     location: super::super::sources::ClaudeLocation::CodeKeychain,
                     path: None,
+                    config_dir: None,
                 },
             },
         };
