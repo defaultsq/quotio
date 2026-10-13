@@ -22,6 +22,11 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         let location: String?
         let entryKey: String?
     }
+    private struct LocalSourceBody: Encodable {
+        let kind: String
+        let configDir: String
+        let label: String?
+    }
     public private(set) var snapshot = QuotaSnapshot()
     private var client: QuotioHostHTTPClient?
     private var reportedAccounts: [Account] = []
@@ -307,6 +312,40 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         await discoverNativeAccounts(providerID: source.provider.rawValue)
     }
 
+    public func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, label: String?) async throws {
+        guard let client else { throw LocalAccountFailure.unknown }
+        let body = try JSONEncoder.quotioCLI.encode(LocalSourceBody(kind: kind, configDir: configDirectory, label: label))
+        do {
+            do {
+                try await mutate(client: client, path: "v2/sources", method: "POST", body: body)
+            } catch QuotioHostClientError.response(_, "permission_required") {
+                try await mutate(
+                    client: client,
+                    path: "v2/sources/authorize",
+                    method: "POST",
+                    body: body,
+                    idempotencyKey: "quotio-native-permission-" + UUID().uuidString,
+                    timeout: .seconds(300)
+                )
+            }
+        } catch {
+            if let problem = Self.storageProblem(error) { storageProblem = problem }
+            throw Self.localAccountFailure(error)
+        }
+    }
+
+    private static func localAccountFailure(_ error: Error) -> LocalAccountFailure {
+        guard case let QuotioHostClientError.response(_, code) = error else { return .unknown }
+        switch code {
+        case "invalid_request": return .invalidInput
+        case "native_login_required", "account_not_found": return .notSignedIn
+        case "duplicate_account": return .duplicateAccount
+        case "native_keychain_access_failed", "quotio_vault_access_failed": return .keychainAccess
+        case "native_credential_invalid", "credential_validation_failed", "invalid_credential": return .invalidCredential
+        default: return .unknown
+        }
+    }
+
     public func accountStorageProblem() async -> AccountStorageProblem? { storageProblem }
 
     public func authorizeAccountStorage() async throws {
@@ -529,9 +568,13 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         guard catalog.schemaVersion == 2 else { throw QuotioHostClientError.incompatible }
         let providers = try catalog.providers.map { value in
             guard let id = QuotaProvider(rawValue: value.id) else { throw QuotioHostClientError.incompatible }
+            let configDirectory = value.capabilities.sourceReferences?.lazy.compactMap { reference in
+                reference.configDirEnv.map { MonitoringProvider.ConfigDirectorySource(kind: reference.kind, environmentVariable: $0) }
+            }.first
             return MonitoringProvider(id: id, displayName: value.displayName,
                 actions: Set(value.actions.filter(\.available).map(\.kind)),
-                inputs: value.capabilities.settings.map { .init(name: $0.name, fieldPath: $0.fieldPath, required: $0.required, values: $0.values) })
+                inputs: value.capabilities.settings.map { .init(name: $0.name, fieldPath: $0.fieldPath, required: $0.required, values: $0.values) },
+                configDirectorySource: configDirectory)
         }
         guard Set(providers.map(\.id)).count == providers.count else { throw QuotioHostClientError.incompatible }
         let names = Dictionary(uniqueKeysWithValues: providers.map { ($0.id, $0.displayName) })
@@ -710,7 +753,8 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
             status: status(value.state), enabled: value.enabled,
             sources: value.sources.map { source in
                 AccountLoginSource(accountID: source.id, source: sourceKind(source.origin), credentialReference: source.kind,
-                    status: status(source.state), location: source.location, enabled: source.enabled, actions: Set(source.actions.filter(\.available).map(\.kind)), keychainAccount: source.keychainAccount)
+                    status: status(source.state), location: source.location, enabled: source.enabled, actions: Set(source.actions.filter(\.available).map(\.kind)), keychainAccount: source.keychainAccount,
+                    directory: source.directory)
             },
             isIdentityVerified: value.identity.evidence == "verified"
         )

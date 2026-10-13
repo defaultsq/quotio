@@ -17,6 +17,15 @@ public enum NativeSourceAuthorizationFailure: Error, Equatable, Sendable {
     case unknown
 }
 
+public enum LocalAccountFailure: Error, Equatable, Sendable {
+    case invalidInput
+    case notSignedIn
+    case duplicateAccount
+    case keychainAccess
+    case invalidCredential
+    case unknown
+}
+
 /// Why the host cannot read Quotio's own account store. Only `requiresAuthorization`
 /// is something the user can fix in place; the other cases need a different Quotio.
 public enum AccountStorageProblem: Equatable, Sendable {
@@ -61,6 +70,9 @@ public protocol AccountManaging: Sendable {
     func rescanAllNativeAccounts() async
     func nativeDiscoverySnapshot() async -> NativeDiscoverySnapshot
     func authorizeNativeSource(_ source: NativeSourcePermission) async throws
+    /// Registers the read-only login a tool keeps in `configDirectory`, asking macOS for
+    /// Keychain access when that login lives in the Keychain.
+    func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, label: String?) async throws
     func accountStorageProblem() async -> AccountStorageProblem?
     func authorizeAccountStorage() async throws
     func accounts() async -> [Account]
@@ -83,4 +95,7 @@ public extension AccountManaging {
     func nativeDiscoverySnapshot() async -> NativeDiscoverySnapshot { .init() }
     func accountStorageProblem() async -> AccountStorageProblem? { nil }
     func authorizeAccountStorage() async throws { throw NativeSourceAuthorizationFailure.unknown }
+    func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, label: String?) async throws {
+        throw LocalAccountFailure.unknown
+    }
 }

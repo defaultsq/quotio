@@ -75,6 +75,7 @@ extension AccountLoginSource {
     }
 
     var locationLabel: String {
+        if let directory { return LocalAccountConnectionSheet.abbreviatingHome(directory) }
         switch (credentialReference, location) {
         case ("claude_native", "code_keychain"): return "Keychain · Claude Code-credentials"
         case ("claude_native", "code_file"): return "~/.claude/.credentials.json"

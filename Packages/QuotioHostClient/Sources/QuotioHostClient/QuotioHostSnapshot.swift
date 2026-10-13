@@ -34,6 +34,8 @@ public struct QuotioHostSnapshot: Decodable, Sendable {
         public let kind: String
         public let location: String?
         public let keychainAccount: String?
+        /// User-chosen config directory, such as `CLAUDE_CONFIG_DIR`.
+        public let directory: String?
         public let enabled: Bool
         public let selected: Bool
         public let state: String

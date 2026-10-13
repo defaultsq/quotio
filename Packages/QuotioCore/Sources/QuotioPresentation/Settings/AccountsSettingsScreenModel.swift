@@ -11,12 +11,14 @@ final class AccountsSettingsScreenModel {
     enum Sheet: Identifiable {
         case oauth(QuotaProvider)
         case apiKey(QuotaProvider, Account?)
+        case localAccount(QuotaProvider)
         case history(QuotaProvider, Account, QuotaHistoryScreenModel)
 
         var id: String {
             switch self {
             case .oauth(let provider): "oauth:" + provider.rawValue
             case .apiKey(let provider, let account): "apiKey:" + provider.rawValue + ":" + (account?.id ?? "")
+            case .localAccount(let provider): "localAccount:" + provider.rawValue
             case .history(_, _, let screen): "history:" + screen.id.uuidString
             }
         }

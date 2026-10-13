@@ -92,6 +92,15 @@ struct AccountsSettingsScreen: View {
                     try await controller.saveAPIKey(provider: provider, label: label, apiKey: key,
                         existingAccountID: account?.id, fields: fields)
                 }
+            case .localAccount(let provider):
+                if let descriptor = controller.providers.first(where: { $0.id == provider }),
+                   let source = descriptor.configDirectorySource {
+                    LocalAccountConnectionSheet(provider: provider, providerName: descriptor.displayName, source: source) { label, directory in
+                        try await accounts.addLocalAccount(provider: provider, kind: source.kind,
+                            configDirectory: directory, label: label)
+                        await controller.refresh(provider: provider)
+                    }
+                }
             case .history(let provider, let account, let screen):
                 QuotaHistorySheet(model: screen, accountName: account.displayName, provider: provider,
                                   displayMode: menuBar.quotaDisplayMode, hideSensitiveInfo: menuBar.hideSensitiveInfo)
