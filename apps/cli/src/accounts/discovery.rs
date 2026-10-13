@@ -183,24 +183,28 @@ impl Registry {
             inspect,
             config_dir,
         } = request;
-        if let Some(dir) = config_dir {
-            if kind != "grok_native" || location.is_some() || domain.is_some() || !inspect {
-                return Err(AccountError::Input);
-            }
-            let candidates: Vec<Value> = GrokNativeReference::entries_in(&dir)?
-                .into_iter()
-                .map(|(entry_key, label)| {
-                    json!({"label":label,"status":"available","source":{"kind":kind,"config_dir":dir.as_str(),"entry_key":entry_key}})
-                })
-                .collect();
-            return Ok(json!({"schema_version":2,"status":"checked","candidates":candidates}));
-        }
         if !crate::providers::capabilities::capability(provider)
             .source_references
             .iter()
             .any(|s| s.kind == kind)
         {
             return Err(AccountError::Input);
+        }
+        if let Some(dir) = config_dir {
+            if kind != "grok_native" || location.is_some() || domain.is_some() || !inspect {
+                return Err(AccountError::Input);
+            }
+            let entries = GrokNativeReference::entries_in(&dir)?;
+            if entries.len() > LIMIT {
+                return Err(AccountError::Corrupt);
+            }
+            let candidates: Vec<Value> = entries
+                .into_iter()
+                .map(|(entry_key, label)| {
+                    json!({"label":label,"status":"available","source":{"kind":kind,"config_dir":dir.as_str(),"entry_key":entry_key}})
+                })
+                .collect();
+            return Ok(json!({"schema_version":2,"status":"checked","candidates":candidates}));
         }
         let locations: &[&str] = match kind.as_str() {
             "codex_native" => &["default", "config", "codex_home"],

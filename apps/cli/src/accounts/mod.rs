@@ -575,9 +575,7 @@ impl Document {
             .ok_or(AccountError::NotFound)?;
         let account = self.accounts[index].clone();
         self.reserve_factory_refresh(&account.id, &account.credential)?;
-        // Discovery never scans a custom config directory, so there is nothing to opt out of.
-        if account.origin() == AccountOrigin::BorrowedNative
-            && account.credential.config_directory().is_none()
+        if account.origin() == AccountOrigin::BorrowedNative && account.credential.rediscoverable()
         {
             self.enable_resolved_accounts()?;
             self.resolved

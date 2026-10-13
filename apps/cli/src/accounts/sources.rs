@@ -924,6 +924,30 @@ impl CodexNativeReference {
 }
 
 impl Credential {
+    /// Whether native discovery can register this source again after its removal.
+    /// A config directory that names a scanned default location still can.
+    pub fn rediscoverable(&self) -> bool {
+        match self {
+            Self::ClaudeNative { source } => source.config_dir.is_none(),
+            Self::CodexNative { source } if source.config_dir.is_some() => [
+                CodexLocation::Default,
+                CodexLocation::Config,
+                CodexLocation::CodexHome,
+            ]
+            .into_iter()
+            .filter_map(|location| CodexNativeReference::system(location).ok())
+            .any(|default| default.path == source.path),
+            Self::GrokNative { source } if source.config_dir.is_some() => {
+                crate::providers::catalog::oauth_editors::grok_auth_path()
+                    .is_some_and(|default| default == source.path)
+            }
+            Self::CopilotNative { source } if source.config_dir.is_some() => {
+                CopilotNativeReference::system(CopilotLocation::GhHosts, "github.com".into())
+                    .is_ok_and(|default| default.path == source.path)
+            }
+            _ => true,
+        }
+    }
     pub fn config_directory(&self) -> Option<String> {
         match self {
             Self::ClaudeNative { source } => source.config_dir.clone(),

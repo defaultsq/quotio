@@ -1111,6 +1111,10 @@ fn config_dir_sources_run_with_an_isolated_home() {
             ".grok-multi/auth.json",
             r#"{"https://auth.x.ai::user-a":{"key":"synthetic-grok-a","expires_at":"2099-01-01T00:00:00Z","email":"a@example.com"},"https://auth.x.ai::user-b":{"key":"synthetic-grok-b","expires_at":"2099-01-01T00:00:00Z","email":"b@example.com"}}"#,
         ),
+        (
+            ".codex/auth.json",
+            r#"{"tokens":{"access_token":"synthetic-default-secret","account_id":"default-id"}}"#,
+        ),
         ("not-a-dir", "file"),
     ];
     for (relative, bytes) in fixtures {
@@ -1118,6 +1122,20 @@ fn config_dir_sources_run_with_an_isolated_home() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
     }
+    let many: serde_json::Map<String, Value> = (0..65)
+        .map(|index| {
+            (
+                format!("https://auth.x.ai::user-{index}"),
+                json!({"key":"synthetic-grok","expires_at":"2099-01-01T00:00:00Z"}),
+            )
+        })
+        .collect();
+    std::fs::create_dir_all(dir.join(".grok-many")).unwrap();
+    std::fs::write(
+        dir.join(".grok-many/auth.json"),
+        serde_json::to_vec(&many).unwrap(),
+    )
+    .unwrap();
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -1359,6 +1377,56 @@ async fn config_dir_sources_child() {
             .resolved
             .is_none_or(|registry| registry.suppressed_providers().is_empty())
     );
+    let discover = |body: Value| {
+        client
+            .post(format!("{base}/v2/sources/discover"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+    };
+    for body in [
+        json!({"provider":"codex","kind":"grok_native","inspect":true,"config_dir":"~/.grok-multi"}),
+        json!({"provider":"grok","kind":"grok_native","inspect":true,"config_dir":"~/.grok-many"}),
+    ] {
+        assert_ne!(
+            discover(body.clone()).await.unwrap().status(),
+            200,
+            "{body}"
+        );
+    }
+    let response = post(
+        "default-dir".into(),
+        json!({"kind":"codex_native","config_dir":"~/.codex"}),
+    )
+    .await
+    .unwrap();
+    let operation: Value = response.json().await.unwrap();
+    let completed =
+        serde_json::to_value(done(&state, operation["id"].as_str().unwrap()).await).unwrap();
+    assert_eq!(completed["status"], "completed", "{completed}");
+    let default_dir = completed["result"]["account_id"].as_str().unwrap();
+    let response: Value = client
+        .delete(format!("{base}/v2/accounts/{default_dir}"))
+        .bearer_auth(token)
+        .header("Idempotency-Key", "remove-default-dir")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        done(&state, response["id"].as_str().unwrap()).await.status,
+        "completed"
+    );
+    let suppressed = vault
+        .begin()
+        .unwrap()
+        .document
+        .resolved
+        .map(|registry| registry.suppressed_providers())
+        .unwrap_or_default();
+    assert!(suppressed.contains("codex"), "{suppressed:?}");
     server.abort();
     for job in state.jobs.lock().unwrap().drain(..) {
         job.abort();
