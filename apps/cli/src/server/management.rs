@@ -317,7 +317,10 @@ pub(super) async fn reference(
     headers: HeaderMap,
     ApiJson(body): ApiJson<Value>,
 ) -> Result<(StatusCode, Json<Operation>), ApiError> {
-    let input = serde_json::from_value(body.clone())
+    let input: api::SourceInput = serde_json::from_value(body.clone())
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid_request"))?;
+    input
+        .check()
         .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid_request"))?;
     mutate(
         state,
@@ -505,12 +508,13 @@ async fn mutate(
                             }
                             input => api::prepare_source(input).await,
                         }
-                        .map_err(|e| {
-                            if authorize {
-                                native_source_error(&e)
-                            } else {
-                                account_code(&e)
-                            }
+                        .map_err(|e| match e {
+                            _ if authorize => native_source_error(&e),
+                            // The host user can grant access through `v2/sources/authorize`.
+                            AccountError::Provider(
+                                crate::error::ProviderError::LocalCredentialStorage,
+                            ) => "permission_required",
+                            _ => account_code(&e),
                         })?;
                         let _guard = work.client_mutation_guard(&principal).await?;
                         let account_id = api::register_source_once(vault, prepared, intent)

@@ -2019,7 +2019,46 @@
                         "enum": [
                           "code_keychain"
                         ]
-                      }
+                      },
+                      "config_dir": {"$ref": "#/components/schemas/SourceConfigDirectory"},
+                      "label": {"type": "string", "minLength": 1, "maxLength": 80, "description": "User display name. Without it the server generates a name that includes the config directory name."}
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "config_dir"
+                    ],
+                    "description": "Grants access to the Keychain service suffixed for this CLAUDE_CONFIG_DIR.",
+                    "properties": {
+                      "kind": {
+                        "const": "claude_native"
+                      },
+                      "config_dir": {"$ref": "#/components/schemas/SourceConfigDirectory"},
+                      "label": {"type": "string", "minLength": 1, "maxLength": 80, "description": "User display name. Without it the server generates a name that includes the config directory name."}
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "config_dir"
+                    ],
+                    "description": "Grants access to the gh:github.com Keychain item of the user named in <config_dir>/hosts.yml.",
+                    "properties": {
+                      "kind": {
+                        "const": "copilot_native"
+                      },
+                      "location": {
+                        "enum": [
+                          "gh_hosts"
+                        ]
+                      },
+                      "config_dir": {"$ref": "#/components/schemas/SourceConfigDirectory"},
+                      "label": {"type": "string", "minLength": 1, "maxLength": 80, "description": "User display name. Without it the server generates a name that includes the config directory name."}
                     }
                   },
                   {
@@ -2076,7 +2115,7 @@
             }
           }
         ],
-        "description": "macOS only. May show one system Keychain permission dialog. Accepts only Claude Code Keychain, Factory encrypted login, and Antigravity Gemini Keychain references. After authorization, registers the read-only source using the normal noninteractive path. Never returns credentials. Automatic discovery, registration and refresh must not call this route. Requires management mode and a new Idempotency-Key per user authorization attempt."
+        "description": "macOS only. May show one system Keychain permission dialog. Accepts only Claude Code Keychain (default or per CLAUDE_CONFIG_DIR), GitHub CLI Keychain (default or per GH_CONFIG_DIR), Factory encrypted login, and Antigravity Gemini Keychain references. After authorization, registers the read-only source using the normal noninteractive path. Never returns credentials. Automatic discovery, registration and refresh must not call this route. Requires management mode and a new Idempotency-Key per user authorization attempt."
       }
     },
     "/v2/sources": {
@@ -3891,7 +3930,8 @@
           "source_id": {
             "type": "string",
             "description": "Opaque stable identity for a registered custom provider source."
-          }
+          },
+          "source_directory": {"type": "string", "description": "User-chosen config directory of a native source, such as CLAUDE_CONFIG_DIR. Never a credential file path."}
         },
         "additionalProperties": false,
         "required": [
@@ -4034,6 +4074,10 @@
                 },
                 "credential_refresh": {
                   "const": false
+                },
+                "config_dir_env": {
+                  "enum": ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "GROK_HOME", "GH_CONFIG_DIR"],
+                  "description": "Environment variable the tool reads for its config directory. Present only for kinds whose POST /v2/sources input accepts config_dir."
                 }
               }
             }
@@ -4666,6 +4710,12 @@
           }}
         }
       },
+      "SourceConfigDirectory": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024,
+        "description": "Existing directory used in place of the tool's default home, as its config_dir_env would name it. A leading ~ expands to the host home directory; the result must be absolute, without . or .. segments. Trailing slashes are removed. Credential file paths are derived by the server."
+      },
       "AccountSourceInput": {
         "oneOf": [
           {"$ref": "#/components/schemas/DiscoveredSourceInput"},
@@ -4676,9 +4726,12 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind", "location"],
+            "required": ["kind"],
+            "description": "Requires location unless config_dir is present. config_dir pins <config_dir>/hosts.yml as gh_hosts.",
             "properties": {
               "kind": {"const": "copilot_native"},
+              "config_dir": {"$ref": "#/components/schemas/SourceConfigDirectory"},
+              "label": {"type": "string", "minLength": 1, "maxLength": 80, "description": "User display name. Without it the server generates a name that includes the config directory name."},
               "location": {
                 "type": "string",
                 "enum": ["apps", "hosts", "gh_hosts", "gh_keychain"],
@@ -4695,9 +4748,12 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind", "location"],
+            "required": ["kind"],
+            "description": "Requires location unless config_dir is present. With config_dir and no location, the server uses <config_dir>/.credentials.json when it exists and otherwise, on macOS, the Keychain service Claude Code-credentials-<first 8 hex of SHA-256(config_dir)>. Operations fail with permission_required when that Keychain item needs POST /v2/sources/authorize.",
             "properties": {
               "kind": {"const": "claude_native"},
+              "config_dir": {"$ref": "#/components/schemas/SourceConfigDirectory"},
+              "label": {"type": "string", "minLength": 1, "maxLength": 80, "description": "User display name. Without it the server generates a name that includes the config directory name."},
               "location": {
                 "type": "string",
                 "enum": ["code_file", "code_keychain"],
@@ -4718,8 +4774,10 @@
                 "type": "string",
                 "enum": ["default", "config", "codex_home"],
                 "default": "default",
-                "description": "default selects ~/.codex/auth.json; config selects ~/.config/codex/auth.json; codex_home selects $CODEX_HOME/auth.json. The server pins the selected absolute path."
-              }
+                "description": "default selects ~/.codex/auth.json; config selects ~/.config/codex/auth.json; codex_home selects $CODEX_HOME/auth.json. The server pins the selected absolute path. Must be default when config_dir is present."
+              },
+              "config_dir": {"$ref": "#/components/schemas/SourceConfigDirectory"},
+              "label": {"type": "string", "minLength": 1, "maxLength": 80, "description": "User display name. Without it the server generates a name that includes the config directory name."}
             }
           },
           {
@@ -4781,10 +4839,12 @@
           {
             "type": "object",
             "required": [
-              "kind",
-              "entry_key"
+              "kind"
             ],
+            "description": "Requires entry_key unless config_dir is present. config_dir selects <config_dir>/auth.json; without entry_key that file must hold exactly one login.",
             "properties": {
+              "config_dir": {"$ref": "#/components/schemas/SourceConfigDirectory"},
+              "label": {"type": "string", "minLength": 1, "maxLength": 80, "description": "User display name. Without it the server generates a name that includes the config directory name."},
               "kind": {
                 "const": "grok_native",
                 "description": "Read-only reference to one explicit entry in ~/.grok/auth.json. The server selects the fixed native path. Credentials stay in the native file and are never refreshed or written by Quotio."
@@ -5291,6 +5351,11 @@
             "type": ["string", "null"],
             "minLength": 1,
             "maxLength": 256
+          },
+          "directory": {
+            "type": "string",
+            "minLength": 1,
+            "description": "User-chosen config directory of a native source, such as CLAUDE_CONFIG_DIR. Never a credential file path."
           },
           "location": {
             "anyOf": [

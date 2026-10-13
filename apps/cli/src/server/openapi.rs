@@ -214,6 +214,7 @@ mod tests {
             source_kind: Some("claude_native"),
             source_location: Some("code_keychain".into()),
             source_id: Some("opaque-source-id".into()),
+            source_directory: None,
             enabled: true,
             origin: crate::accounts::AccountOrigin::Owned,
             id: "synthetic-account".into(),

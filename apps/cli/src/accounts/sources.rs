@@ -2,6 +2,58 @@
 use super::{AccountError, Credential};
 use serde::{Deserialize, Serialize};
 
+/// An existing directory chosen in place of a tool's default home, such as
+/// `CLAUDE_CONFIG_DIR`. `~` is expanded the way a shell expands the exported
+/// value, so `as_str` is the string the tool itself sees.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigDir(std::path::PathBuf);
+impl ConfigDir {
+    pub fn parse(raw: &str) -> Result<Self, AccountError> {
+        let expanded = match raw.strip_prefix('~') {
+            Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+                let home = std::env::var_os("HOME").ok_or(AccountError::NotFound)?;
+                std::path::PathBuf::from(home).join(rest.trim_start_matches('/'))
+            }
+            Some(_) => return Err(AccountError::Input),
+            None => std::path::PathBuf::from(raw),
+        };
+        if raw.len() > 1024
+            || !expanded.is_absolute()
+            || expanded.components().any(|c| {
+                matches!(
+                    c,
+                    std::path::Component::ParentDir | std::path::Component::CurDir
+                )
+            })
+        {
+            return Err(AccountError::Input);
+        }
+        let path: std::path::PathBuf = expanded.components().collect();
+        path.to_str().ok_or(AccountError::Input)?;
+        if !path.is_dir() {
+            return Err(AccountError::NotFound);
+        }
+        Ok(Self(path))
+    }
+    pub fn as_str(&self) -> &str {
+        self.0.to_str().expect("validated as UTF-8")
+    }
+    pub fn join(&self, file: &str) -> std::path::PathBuf {
+        self.0.join(file)
+    }
+}
+impl<'de> Deserialize<'de> for ConfigDir {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(|_| serde::de::Error::custom("invalid config directory"))
+    }
+}
+/// A reference derived from a config directory must point at that directory's file.
+fn in_config_dir(dir: &Option<String>, path: &std::path::Path, file: &str) -> bool {
+    dir.as_ref()
+        .is_none_or(|dir| path == std::path::Path::new(dir).join(file))
+}
+
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AntigravityLocation {
@@ -75,6 +127,9 @@ pub struct CopilotNativeReference {
     pub location: CopilotLocation,
     pub path: Option<std::path::PathBuf>,
     pub entry_key: String,
+    /// User-chosen config directory this reference was derived from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
 }
 impl CopilotNativeReference {
     pub fn system(location: CopilotLocation, entry_key: String) -> Result<Self, AccountError> {
@@ -105,6 +160,18 @@ impl CopilotNativeReference {
             location,
             path,
             entry_key,
+            config_dir: None,
+        };
+        source.identity()?;
+        Ok(source)
+    }
+    /// `GH_CONFIG_DIR`: gh keeps `hosts.yml` there; its Keychain service stays fixed.
+    pub fn in_config_dir(dir: &ConfigDir) -> Result<Self, AccountError> {
+        let source = Self {
+            location: CopilotLocation::GhHosts,
+            path: Some(dir.join("hosts.yml")),
+            entry_key: "github.com".into(),
+            config_dir: Some(dir.as_str().into()),
         };
         source.identity()?;
         Ok(source)
@@ -112,6 +179,12 @@ impl CopilotNativeReference {
     pub fn identity(&self) -> Result<String, AccountError> {
         let key = &self.entry_key;
         if key.len() > 256 || key.is_empty() || key.chars().any(char::is_control) {
+            return Err(AccountError::Input);
+        }
+        if self.config_dir.as_ref().is_some_and(|dir| {
+            self.location != CopilotLocation::GhHosts
+                || self.path.as_deref() != Some(&std::path::Path::new(dir).join("hosts.yml"))
+        }) {
             return Err(AccountError::Input);
         }
         let location = match (self.location, &self.path) {
@@ -204,6 +277,25 @@ pub enum ClaudeLocation {
 pub struct ClaudeNativeReference {
     pub location: ClaudeLocation,
     pub path: Option<std::path::PathBuf>,
+    /// User-chosen `CLAUDE_CONFIG_DIR`, which also selects the Keychain service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
+}
+const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+/// Claude Code suffixes its Keychain service with a digest of the exact
+/// `CLAUDE_CONFIG_DIR` string, even when it names the default directory.
+pub(crate) fn claude_keychain_service(config_dir: Option<&str>) -> String {
+    match config_dir {
+        None => CLAUDE_KEYCHAIN_SERVICE.into(),
+        Some(dir) => {
+            let digest = ring::digest::digest(&ring::digest::SHA256, dir.as_bytes());
+            let hex: String = digest.as_ref()[..4]
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            format!("{CLAUDE_KEYCHAIN_SERVICE}-{hex}")
+        }
+    }
 }
 impl ClaudeNativeReference {
     pub fn system(location: ClaudeLocation) -> Result<Self, AccountError> {
@@ -221,30 +313,71 @@ impl ClaudeNativeReference {
                 None
             }
         };
-        let source = Self { location, path };
+        let source = Self {
+            location,
+            path,
+            config_dir: None,
+        };
         source.identity()?;
         Ok(source)
     }
+    pub fn in_config_dir(dir: &ConfigDir, location: ClaudeLocation) -> Result<Self, AccountError> {
+        if location == ClaudeLocation::CodeKeychain && !cfg!(target_os = "macos") {
+            return Err(AccountError::Unsupported);
+        }
+        let source = Self {
+            location,
+            path: (location == ClaudeLocation::CodeFile).then(|| dir.join(".credentials.json")),
+            config_dir: Some(dir.as_str().into()),
+        };
+        source.identity()?;
+        Ok(source)
+    }
+    pub fn keychain_service(&self) -> String {
+        claude_keychain_service(self.config_dir.as_deref())
+    }
+    /// The `.claude.json` that holds account metadata next to these credentials.
+    pub fn metadata_path(&self) -> Option<std::path::PathBuf> {
+        match &self.config_dir {
+            Some(dir) => Some(std::path::Path::new(dir).join(".claude.json")),
+            None => directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".claude.json")),
+        }
+    }
     pub fn identity(&self) -> Result<String, AccountError> {
-        let location = match (self.location, &self.path) {
-            (ClaudeLocation::CodeFile, Some(path))
-                if path.is_absolute()
-                    && !path
-                        .components()
-                        .any(|c| matches!(c, std::path::Component::ParentDir)) =>
+        let safe = |path: &std::path::Path| {
+            path.is_absolute()
+                && !path
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+        };
+        if let Some(dir) = &self.config_dir {
+            let dir = std::path::Path::new(dir);
+            if !safe(dir)
+                || self
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| *path != dir.join(".credentials.json"))
             {
+                return Err(AccountError::Input);
+            }
+        }
+        let service = self.keychain_service();
+        let location = match (self.location, &self.path) {
+            (ClaudeLocation::CodeFile, Some(path)) if safe(path) => {
                 path.to_str().ok_or(AccountError::Input)?
             }
-            (ClaudeLocation::CodeKeychain, None) => "Claude Code-credentials",
+            (ClaudeLocation::CodeKeychain, None) => &service,
             _ => return Err(AccountError::Input),
         };
-        Ok(crate::cache::fingerprint(&["claude_native", location]))
+        let mut parts = vec!["claude_native", location];
+        if let Some(dir) = &self.config_dir {
+            parts.push(dir);
+        }
+        Ok(crate::cache::fingerprint(&parts))
     }
     pub async fn resolve(&self) -> Result<Resolved, AccountError> {
         self.identity()?;
-        let login =
-            crate::providers::catalog::oauth_primary::claude_reference_login(self.path.clone())
-                .await?;
+        let login = crate::providers::catalog::oauth_primary::claude_reference_login(self).await?;
         Ok(Resolved {
             label: match self.location {
                 ClaudeLocation::CodeFile => "Claude Code file",
@@ -595,6 +728,9 @@ impl CursorNativeReference {
 pub struct GrokNativeReference {
     pub path: std::path::PathBuf,
     pub entry_key: String,
+    /// User-chosen config directory this reference was derived from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
 }
 impl GrokNativeReference {
     pub fn system(entry_key: String) -> Result<Self, AccountError> {
@@ -602,6 +738,46 @@ impl GrokNativeReference {
             path: crate::providers::catalog::oauth_editors::grok_auth_path()
                 .ok_or(AccountError::Unsupported)?,
             entry_key,
+            config_dir: None,
+        };
+        source.identity()?;
+        Ok(source)
+    }
+    /// `GROK_HOME`. Without an explicit entry, the file must hold exactly one login.
+    pub fn in_config_dir(dir: &ConfigDir, entry_key: Option<String>) -> Result<Self, AccountError> {
+        let path = dir.join("auth.json");
+        let entry_key = match entry_key {
+            Some(key) => key,
+            None => {
+                let bytes = super::discovery::read_native(&path)?;
+                let value: serde_json::Value =
+                    serde_json::from_slice(&bytes).map_err(|_| AccountError::Corrupt)?;
+                let mut keys = value
+                    .as_object()
+                    .ok_or(AccountError::Corrupt)?
+                    .iter()
+                    .filter(|(_, entry)| entry.is_object())
+                    .map(|(key, _)| key.clone())
+                    .filter(|key| {
+                        Self {
+                            path: path.clone(),
+                            entry_key: key.clone(),
+                            config_dir: None,
+                        }
+                        .identity()
+                        .is_ok()
+                    });
+                match (keys.next(), keys.next()) {
+                    (Some(key), None) => key,
+                    (None, _) => return Err(AccountError::NotFound),
+                    (Some(_), Some(_)) => return Err(AccountError::Input),
+                }
+            }
+        };
+        let source = Self {
+            path,
+            entry_key,
+            config_dir: Some(dir.as_str().into()),
         };
         source.identity()?;
         Ok(source)
@@ -609,6 +785,7 @@ impl GrokNativeReference {
     pub fn identity(&self) -> Result<String, AccountError> {
         let key = &self.entry_key;
         if !self.path.is_absolute()
+            || !in_config_dir(&self.config_dir, &self.path, "auth.json")
             || key.len() > 256
             || !(key == "https://accounts.x.ai/sign-in"
                 || key.strip_prefix("https://auth.x.ai::").is_some_and(|id| {
@@ -664,6 +841,9 @@ pub enum CodexLocation {
 #[serde(deny_unknown_fields)]
 pub struct CodexNativeReference {
     pub path: std::path::PathBuf,
+    /// User-chosen config directory this reference was derived from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
 }
 impl CodexNativeReference {
     pub fn system(location: CodexLocation) -> Result<Self, AccountError> {
@@ -680,12 +860,24 @@ impl CodexNativeReference {
                     _ => ".codex/auth.json",
                 }),
         };
-        let source = Self { path };
+        let source = Self {
+            path,
+            config_dir: None,
+        };
+        source.identity()?;
+        Ok(source)
+    }
+    pub fn in_config_dir(dir: &ConfigDir) -> Result<Self, AccountError> {
+        let source = Self {
+            path: dir.join("auth.json"),
+            config_dir: Some(dir.as_str().into()),
+        };
         source.identity()?;
         Ok(source)
     }
     pub fn identity(&self) -> Result<String, AccountError> {
         if !self.path.is_absolute()
+            || !in_config_dir(&self.config_dir, &self.path, "auth.json")
             || self
                 .path
                 .components()
@@ -722,6 +914,15 @@ impl CodexNativeReference {
 }
 
 impl Credential {
+    pub fn config_directory(&self) -> Option<String> {
+        match self {
+            Self::ClaudeNative { source } => source.config_dir.clone(),
+            Self::CodexNative { source } => source.config_dir.clone(),
+            Self::GrokNative { source } => source.config_dir.clone(),
+            Self::CopilotNative { source } => source.config_dir.clone(),
+            _ => None,
+        }
+    }
     pub async fn resolve_reference(
         &self,
         provider: crate::cli::Provider,
@@ -1125,6 +1326,7 @@ mod tests {
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("apps.json");
         let source = CopilotNativeReference {
+            config_dir: None,
             location: CopilotLocation::Apps,
             path: Some(path.clone()),
             entry_key: "github.com:chosen".into(),
@@ -1172,6 +1374,7 @@ mod tests {
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("hosts.yml");
         let mut source = CopilotNativeReference {
+            config_dir: None,
             location: CopilotLocation::GhHosts,
             path: Some(path.clone()),
             entry_key: "enterprise.example".into(),
@@ -1253,6 +1456,58 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn claude_config_dir_selects_its_own_file_and_keychain_service() {
+        assert_eq!(
+            claude_keychain_service(Some("/Users/u/.claude-work")),
+            "Claude Code-credentials-87169a1d"
+        );
+        assert_eq!(claude_keychain_service(None), "Claude Code-credentials");
+        let dir = std::env::temp_dir().join(super::super::random_string().unwrap());
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            dir.join(".credentials.json"),
+            br#"{"claudeAiOauth":{"accessToken":"fixture-work"}}"#,
+        )
+        .unwrap();
+        let config = ConfigDir::parse(&format!("{}/", dir.display())).unwrap();
+        assert_eq!(config.as_str(), dir.to_str().unwrap());
+        let file = ClaudeNativeReference::in_config_dir(&config, ClaudeLocation::CodeFile).unwrap();
+        assert_eq!(file.path.as_deref(), Some(&*dir.join(".credentials.json")));
+        assert_eq!(file.metadata_path(), Some(dir.join(".claude.json")));
+        let Credential::CatalogKey { token, .. } = &file.resolve().await.unwrap().credentials[0]
+        else {
+            panic!("catalog key expected");
+        };
+        assert_eq!(token, "fixture-work");
+        assert_ne!(
+            file.identity().unwrap(),
+            ClaudeNativeReference::system(ClaudeLocation::CodeFile)
+                .unwrap()
+                .identity()
+                .unwrap()
+        );
+        if cfg!(target_os = "macos") {
+            let keychain =
+                ClaudeNativeReference::in_config_dir(&config, ClaudeLocation::CodeKeychain)
+                    .unwrap();
+            assert_eq!(
+                keychain.keychain_service(),
+                claude_keychain_service(Some(dir.to_str().unwrap()))
+            );
+            assert_ne!(
+                keychain.identity().unwrap(),
+                ClaudeNativeReference::system(ClaudeLocation::CodeKeychain)
+                    .unwrap()
+                    .identity()
+                    .unwrap()
+            );
+        }
+        let mut moved = file.clone();
+        moved.path = Some(dir.join("other.json"));
+        assert!(moved.identity().is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[tokio::test]
     async fn claude_native_rejects_hostile_files_without_fallback() {
         let dir = std::env::temp_dir().join(super::super::random_string().unwrap());
         std::fs::create_dir(&dir).unwrap();
@@ -1260,6 +1515,7 @@ mod tests {
         let source = ClaudeNativeReference {
             location: ClaudeLocation::CodeFile,
             path: Some(path.clone()),
+            config_dir: None,
         };
         assert!(source.resolve().await.is_err());
         for bytes in [b"{}".to_vec(), vec![b' '; 1024 * 1024 + 1]] {
@@ -1320,7 +1576,10 @@ mod tests {
         let dir = std::env::temp_dir().join(super::super::random_string().unwrap());
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("auth.json");
-        let source = CodexNativeReference { path: path.clone() };
+        let source = CodexNativeReference {
+            config_dir: None,
+            path: path.clone(),
+        };
         std::fs::write(
             &path,
             br#"{"tokens":{"access_token":"fixture","account_id":"id"}}"#,

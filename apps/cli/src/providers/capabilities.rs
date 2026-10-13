@@ -160,6 +160,10 @@ pub struct SourceCapability {
     pub platforms: Vec<&'static str>,
     pub origin: &'static str,
     pub credential_refresh: bool,
+    /// Environment variable the tool reads for its config directory. When present,
+    /// `POST /v2/sources` accepts that directory as `config_dir`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_dir_env: Option<&'static str>,
 }
 #[derive(Clone, Serialize, PartialEq, Eq)]
 pub struct ProviderCapability {
@@ -302,6 +306,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos"],
                 origin: "borrowed_proxy",
                 credential_refresh: false,
+                config_dir_env: None,
             }]
         } else if provider == Provider::Catalog("devin-desktop") {
             vec![SourceCapability {
@@ -309,6 +314,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos", "linux"],
                 origin: "borrowed_native",
                 credential_refresh: false,
+                config_dir_env: None,
             }]
         } else if provider == Provider::Antigravity {
             vec![SourceCapability {
@@ -316,6 +322,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos"],
                 origin: "borrowed_native",
                 credential_refresh: false,
+                config_dir_env: None,
             }]
         } else if provider == Provider::Catalog("kiro") {
             vec![SourceCapability {
@@ -323,6 +330,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos", "linux"],
                 origin: "borrowed_native",
                 credential_refresh: false,
+                config_dir_env: None,
             }]
         } else if provider == Provider::Factory {
             vec![SourceCapability {
@@ -330,6 +338,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos", "linux"],
                 origin: "borrowed_native",
                 credential_refresh: false,
+                config_dir_env: None,
             }]
         } else if provider == Provider::Catalog("copilot") {
             vec![SourceCapability {
@@ -337,6 +346,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos", "linux"],
                 origin: "borrowed_native",
                 credential_refresh: false,
+                config_dir_env: Some("GH_CONFIG_DIR"),
             }]
         } else if provider == Provider::Catalog("claude") {
             vec![SourceCapability {
@@ -344,6 +354,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos", "linux"],
                 origin: "borrowed_native",
                 credential_refresh: false,
+                config_dir_env: Some("CLAUDE_CONFIG_DIR"),
             }]
         } else if provider == Provider::Catalog("grok") {
             vec![SourceCapability {
@@ -351,6 +362,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos", "linux"],
                 origin: "borrowed_native",
                 credential_refresh: false,
+                config_dir_env: Some("GROK_HOME"),
             }]
         } else if provider == Provider::Catalog("cursor") {
             vec![SourceCapability {
@@ -358,6 +370,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos"],
                 origin: "borrowed_native",
                 credential_refresh: false,
+                config_dir_env: None,
             }]
         } else if provider == Provider::Codex {
             vec![SourceCapability {
@@ -365,6 +378,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos", "linux"],
                 origin: "borrowed_native",
                 credential_refresh: false,
+                config_dir_env: Some("CODEX_HOME"),
             }]
         } else if provider == Provider::Amp {
             vec![SourceCapability {
@@ -372,6 +386,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
                 platforms: vec!["macos", "linux"],
                 origin: "borrowed_native",
                 credential_refresh: false,
+                config_dir_env: None,
             }]
         } else {
             vec![]
@@ -392,6 +407,7 @@ pub fn capability(provider: Provider) -> ProviderCapability {
             platforms: vec!["macos", "linux"],
             origin: "borrowed_proxy",
             credential_refresh: false,
+            config_dir_env: None,
         });
     }
     ProviderCapability {

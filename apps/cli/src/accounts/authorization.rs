@@ -4,39 +4,56 @@ use super::{
     sources::{AntigravityLocation, ClaudeLocation, CopilotLocation, FactoryLocation},
 };
 
-pub(crate) fn target(input: &SourceInput) -> Result<(&'static str, Option<&str>), AccountError> {
+pub(crate) fn target(input: &SourceInput) -> Result<(String, Option<&str>), AccountError> {
     match input {
         SourceInput::CopilotNative {
-            location: CopilotLocation::GhKeychain,
+            location: Some(CopilotLocation::GhKeychain),
             entry_key,
-        } if entry_key.is_empty() || entry_key == "github.com" => Ok(("gh:github.com", None)),
+            config_dir: None,
+            ..
+        } if entry_key.is_empty() || entry_key == "github.com" => {
+            Ok(("gh:github.com".into(), None))
+        }
         SourceInput::CopilotNative {
-            location: CopilotLocation::GhKeychain,
+            location: Some(CopilotLocation::GhKeychain),
             entry_key,
+            config_dir: None,
+            ..
         } if crate::providers::catalog::oauth_primary::valid_copilot_keychain_account(
             entry_key,
         ) =>
         {
-            Ok(("gh:github.com", Some(entry_key)))
+            Ok(("gh:github.com".into(), Some(entry_key)))
         }
         SourceInput::ClaudeNative {
-            location: ClaudeLocation::CodeKeychain,
-        } => Ok(("Claude Code-credentials", None)),
+            location: Some(ClaudeLocation::CodeKeychain),
+            config_dir,
+            ..
+        }
+        | SourceInput::ClaudeNative {
+            location: None,
+            config_dir: config_dir @ Some(_),
+            ..
+        } => Ok((
+            super::sources::claude_keychain_service(config_dir.as_ref().map(|dir| dir.as_str())),
+            None,
+        )),
         SourceInput::AntigravityNative {
             location: AntigravityLocation::GeminiKeychain,
-        } => Ok(("gemini", Some("antigravity"))),
+        } => Ok(("gemini".into(), Some("antigravity"))),
         SourceInput::FactoryNative {
             location:
                 FactoryLocation::V2LoginKeychain | FactoryLocation::V2Keyring | FactoryLocation::Legacy,
             entry_key: Some(account),
         } if crate::providers::factory::valid_keychain_account(account) => {
-            Ok(("Factory CLI", Some(account)))
+            Ok(("Factory CLI".into(), Some(account)))
         }
         _ => Err(AccountError::Input),
     }
 }
 
 pub(crate) fn validate(input: &SourceInput) -> Result<(), AccountError> {
+    input.check()?;
     if matches!(
         input,
         SourceInput::FactoryNative {
@@ -44,6 +61,9 @@ pub(crate) fn validate(input: &SourceInput) -> Result<(), AccountError> {
                 | FactoryLocation::V2Keyring
                 | FactoryLocation::Legacy,
             entry_key: None,
+        } | SourceInput::CopilotNative {
+            config_dir: Some(_),
+            ..
         }
     ) {
         return Ok(());
@@ -62,8 +82,26 @@ pub(crate) async fn authorize(mut input: SourceInput) -> Result<SourceInput, Acc
         return Ok(input);
     }
     if let SourceInput::CopilotNative {
-        location: CopilotLocation::GhKeychain,
+        config_dir: Some(dir),
+        ..
+    } = &input
+    {
+        // gh keeps the token in the fixed service under the user named in this hosts.yml.
+        let account = crate::providers::catalog::oauth_primary::copilot_gh_hosts_account(
+            dir.join("hosts.yml"),
+        )
+        .await?;
+        tokio::task::spawn_blocking(move || {
+            crate::providers::catalog::common::authorize_keychain("gh:github.com", Some(&account))
+        })
+        .await
+        .map_err(|_| AccountError::Storage)??;
+        return Ok(input);
+    }
+    if let SourceInput::CopilotNative {
+        location: Some(CopilotLocation::GhKeychain),
         entry_key,
+        ..
     } = &mut input
         && (entry_key.is_empty() || entry_key == "github.com")
     {
@@ -83,7 +121,7 @@ pub(crate) async fn authorize(mut input: SourceInput) -> Result<SourceInput, Acc
     let account = account.map(str::to_owned);
     tokio::task::spawn_blocking(move || {
         use crate::providers::catalog::common;
-        common::authorize_keychain(service, account.as_deref())
+        common::authorize_keychain(&service, account.as_deref())
     })
     .await
     .map_err(|_| AccountError::Storage)??;
@@ -101,7 +139,10 @@ mod tests {
                 location: FactoryLocation::V2Keyring,
                 entry_key: Some(account.into()),
             };
-            assert_eq!(target(&input).unwrap(), ("Factory CLI", Some(account)));
+            assert_eq!(
+                target(&input).unwrap(),
+                ("Factory CLI".to_owned(), Some(account))
+            );
         }
         for entry_key in [None, Some("unrelated-account".into())] {
             assert!(
@@ -140,7 +181,9 @@ mod tests {
         }
         for source in [
             SourceInput::ClaudeNative {
-                location: ClaudeLocation::CodeFile,
+                location: Some(ClaudeLocation::CodeFile),
+                config_dir: None,
+                label: None,
             },
             SourceInput::FactoryNative {
                 location: FactoryLocation::V2File,

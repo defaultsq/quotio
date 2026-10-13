@@ -221,13 +221,14 @@ pub(crate) async fn native_file(path: PathBuf) -> Result<Option<Vec<u8>>, Provid
 }
 
 pub(crate) async fn native_keychain(
-    service: &'static str,
+    service: &str,
     account: Option<&str>,
 ) -> Result<Option<Vec<u8>>, ProviderError> {
+    let service = service.to_owned();
     let account = account.map(str::to_owned);
     match tokio::time::timeout(
         NATIVE_READ_TIMEOUT,
-        tokio::task::spawn_blocking(move || common::read_keychain(service, account.as_deref())),
+        tokio::task::spawn_blocking(move || common::read_keychain(&service, account.as_deref())),
     )
     .await
     {
@@ -340,11 +341,11 @@ fn claude_login_from_bytes(bytes: &[u8]) -> Result<Option<ClaudeLogin>, Provider
 }
 
 pub(crate) async fn claude_reference_login(
-    path: Option<PathBuf>,
+    source: &crate::accounts::sources::ClaudeNativeReference,
 ) -> Result<ClaudeLogin, ProviderError> {
-    let bytes = match path {
-        Some(path) => native_file(path).await?,
-        None => native_keychain("Claude Code-credentials", None).await?,
+    let bytes = match &source.path {
+        Some(path) => native_file(path.clone()).await?,
+        None => native_keychain(&source.keychain_service(), None).await?,
     }
     .ok_or(ProviderError::Authentication)?;
     claude_login_from_bytes(&bytes)?.ok_or(ProviderError::Authentication)
@@ -583,6 +584,7 @@ pub(crate) async fn fetch_claude_at(
 pub(crate) async fn fetch_claude_native(
     context: &ProviderContext,
     login: &ClaudeLogin,
+    metadata_path: Option<PathBuf>,
     endpoint_override: Option<&str>,
 ) -> Result<ProviderUsage, ProviderError> {
     fetch_claude_with_login_at(
@@ -590,11 +592,7 @@ pub(crate) async fn fetch_claude_native(
         login,
         endpoint_override.unwrap_or(CLAUDE_USAGE_URL),
         endpoint_override.unwrap_or(CLAUDE_PROFILE_URL),
-        endpoint_override
-            .is_none()
-            .then(home_dir)
-            .flatten()
-            .map(|home| home.join(".claude.json")),
+        metadata_path.filter(|_| endpoint_override.is_none()),
         // The caller rereads the native source after this fetch to fence the result.
         NATIVE_READ_TIMEOUT,
     )
@@ -1114,7 +1112,11 @@ where
 
 pub(crate) async fn copilot_keychain_account() -> Result<String, ProviderError> {
     let home = home_dir().ok_or(ProviderError::Authentication)?;
-    let bytes = native_file(home.join(".config/gh/hosts.yml"))
+    copilot_gh_hosts_account(home.join(".config/gh/hosts.yml")).await
+}
+
+pub(crate) async fn copilot_gh_hosts_account(path: PathBuf) -> Result<String, ProviderError> {
+    let bytes = native_file(path)
         .await?
         .ok_or(ProviderError::Authentication)?;
     copilot_gh_username(&bytes)?

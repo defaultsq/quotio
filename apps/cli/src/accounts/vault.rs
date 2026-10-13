@@ -17,7 +17,7 @@ fn has_factory_selectors(document: &Document) -> bool {
 }
 
 /// Highest document format this build reads and writes.
-const SUPPORTED_FORMAT: u8 = 21;
+const SUPPORTED_FORMAT: u8 = 22;
 
 /// Lenient view of a document that reads only its format, so a document from a
 /// newer Quotio is told apart from a corrupt one before the strict parse.
@@ -368,6 +368,7 @@ impl Vault {
                 let doc: Document =
                     serde_json::from_slice(&bytes).map_err(|_| AccountError::Corrupt)?;
                 if !matches!(doc.version, 1..=SUPPORTED_FORMAT)
+                    || (doc.version < 22 && doc.has_config_dirs())
                     || (doc.version < 21
                         && doc
                             .resolved
@@ -632,6 +633,10 @@ impl Transaction {
             .is_some_and(|registry| registry.has_history_epochs())
         {
             self.document.version = self.document.version.max(21);
+        }
+        // Format-21 readers reject a source's config directory as an unknown field.
+        if self.document.has_config_dirs() {
+            self.document.version = self.document.version.max(22);
         }
         let bytes = serde_json::to_vec(&self.document).map_err(|_| AccountError::Corrupt)?;
         if bytes.len() > 1024 * 1024 {
@@ -935,6 +940,35 @@ pub(crate) mod tests {
             .unwrap();
         assert!(matches!(vault.begin(), Err(AccountError::Corrupt)));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn config_dir_sources_require_format_twenty_two() {
+        let memory = Arc::new(Memory::default());
+        let dir = std::env::temp_dir().join(random_string().unwrap());
+        let vault = Vault::new(memory.clone(), dir.join("lock"));
+        let source = crate::accounts::sources::ClaudeNativeReference {
+            location: crate::accounts::sources::ClaudeLocation::CodeKeychain,
+            path: None,
+            config_dir: Some("/Users/u/.claude-work".into()),
+        };
+        let mut tx = vault.begin().unwrap();
+        tx.document
+            .add(
+                Provider::Catalog("claude"),
+                "Work",
+                source.identity().unwrap(),
+                crate::accounts::Credential::ClaudeNative { source },
+            )
+            .unwrap();
+        tx.commit().unwrap();
+        let bytes = memory.read().unwrap().unwrap();
+        let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 22);
+        // A format-21 reader would reject the directory field and could not load the vault.
+        value["version"] = 21.into();
+        memory.write(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(matches!(vault.begin(), Err(AccountError::Corrupt)));
+        std::fs::remove_dir_all(dir).ok();
     }
     #[test]
     fn enterprise_copilot_hosts_require_format_twenty() {

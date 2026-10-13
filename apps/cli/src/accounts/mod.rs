@@ -573,7 +573,10 @@ impl Document {
             .ok_or(AccountError::NotFound)?;
         let account = self.accounts[index].clone();
         self.reserve_factory_refresh(&account.id, &account.credential)?;
-        if account.origin() == AccountOrigin::BorrowedNative {
+        // Discovery never scans a custom config directory, so there is nothing to opt out of.
+        if account.origin() == AccountOrigin::BorrowedNative
+            && account.credential.config_directory().is_none()
+        {
             self.enable_resolved_accounts()?;
             self.resolved
                 .as_mut()
@@ -700,6 +703,11 @@ impl Document {
     }
 }
 impl Document {
+    pub(crate) fn has_config_dirs(&self) -> bool {
+        self.accounts
+            .iter()
+            .any(|account| account.credential.config_directory().is_some())
+    }
     pub(crate) fn has_enterprise_copilot(&self) -> bool {
         self.accounts.iter().any(|account| {
             matches!(
@@ -784,6 +792,7 @@ mod naming_tests {
                 Provider::Catalog("grok"),
                 Credential::GrokNative {
                     source: sources::GrokNativeReference {
+                        config_dir: None,
                         path: "/tmp/grok/auth.json".into(),
                         entry_key: "https://auth.x.ai::fixture".into(),
                     },
@@ -794,6 +803,7 @@ mod naming_tests {
                 Provider::Catalog("copilot"),
                 Credential::CopilotNative {
                     source: sources::CopilotNativeReference {
+                        config_dir: None,
                         location: sources::CopilotLocation::GhKeychain,
                         path: None,
                         entry_key: "verified-user".into(),
