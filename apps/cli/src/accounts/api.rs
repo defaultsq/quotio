@@ -704,13 +704,17 @@ pub async fn prepare_source(input: SourceInput) -> Result<PreparedAccount, Accou
         "Local Cursor account".into()
     } else if let Some(directory) = directory {
         // Generated names must differ per directory; the account label is unique per provider.
-        let name: String = std::path::Path::new(&directory)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(&directory)
-            .chars()
-            .take(40)
-            .collect();
+        let path = std::env::var("HOME")
+            .ok()
+            .and_then(|home| directory.strip_prefix(&home).map(|rest| format!("~{rest}")))
+            .unwrap_or(directory);
+        let chars: Vec<char> = path.chars().collect();
+        let name: String = if chars.len() <= 40 {
+            path
+        } else {
+            let tail: String = chars[chars.len() - 30..].iter().collect();
+            format!("…{tail} {}", identity.chars().take(8).collect::<String>())
+        };
         format!(
             "{} ({name})",
             resolved.label.chars().take(36).collect::<String>()

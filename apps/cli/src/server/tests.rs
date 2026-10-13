@@ -1099,6 +1099,14 @@ fn config_dir_sources_run_with_an_isolated_home() {
             ".claude-work/.credentials.json",
             r#"{"claudeAiOauth":{"accessToken":"synthetic-claude-secret","refreshToken":"owner-refresh"}}"#,
         ),
+        (
+            "client-a/.claude/.credentials.json",
+            r#"{"claudeAiOauth":{"accessToken":"synthetic-client-a"}}"#,
+        ),
+        (
+            "client-b/.claude/.credentials.json",
+            r#"{"claudeAiOauth":{"accessToken":"synthetic-client-b"}}"#,
+        ),
         ("not-a-dir", "file"),
     ];
     for (relative, bytes) in fixtures {
@@ -1226,6 +1234,14 @@ async fn config_dir_sources_child() {
             "claude",
             json!({"kind":"claude_native","config_dir":"~/.claude-work"}),
         ),
+        (
+            "client-a",
+            json!({"kind":"claude_native","config_dir":"~/client-a/.claude"}),
+        ),
+        (
+            "client-b",
+            json!({"kind":"claude_native","config_dir":"~/client-b/.claude"}),
+        ),
     ] {
         let response = post(key.into(), input).await.unwrap();
         assert_eq!(response.status(), 202);
@@ -1261,6 +1277,11 @@ async fn config_dir_sources_child() {
         format!("{home}/.claude-work")
     );
     assert!(!claude.to_string().contains("synthetic-"));
+    let client_a: Value = account(ids[3].clone()).await.json().await.unwrap();
+    assert_eq!(
+        client_a["display_name"],
+        "Claude Code file (~/client-a/.claude)"
+    );
     let document = vault.begin().unwrap().document;
     assert_eq!(document.version, 22);
     let codex_paths: Vec<_> = document
