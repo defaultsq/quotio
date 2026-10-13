@@ -332,7 +332,7 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
     public func addLocalAccount(provider: QuotaProvider, kind: String, configDirectory: String, entryKey: String?, label: String?) async throws {
         guard let client else { throw LocalAccountFailure.unknown }
         // Claude Code NFC-normalizes CLAUDE_CONFIG_DIR before hashing it into its Keychain service.
-        let directory = configDirectory.precomposedStringWithCanonicalMapping
+        let directory = kind == "claude_native" ? configDirectory.precomposedStringWithCanonicalMapping : configDirectory
         let body = try JSONEncoder.quotioCLI.encode(LocalSourceBody(kind: kind, configDir: directory, entryKey: entryKey, label: label))
         do {
             do {
