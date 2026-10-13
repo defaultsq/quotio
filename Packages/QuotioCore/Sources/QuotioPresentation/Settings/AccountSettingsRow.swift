@@ -137,7 +137,7 @@ struct AccountSettingsRow: View {
         case .authorize:
             guard let source, let kind = source.credentialReference else { return .retry }
             return .authorize(NativeSourcePermission(provider: provider, kind: kind, location: source.location,
-                keychainAccount: source.keychainAccount))
+                keychainAccount: source.keychainAccount, configDirectory: source.directory))
         case .refreshInSourceApp, .retry:
             return .retry
         }
