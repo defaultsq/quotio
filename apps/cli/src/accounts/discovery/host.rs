@@ -102,6 +102,7 @@ pub async fn scan(
                 location: None,
                 domain: None,
                 inspect: true,
+                config_dir: None,
             };
             let scanned = tokio::time::timeout(
                 std::time::Duration::from_secs(10),

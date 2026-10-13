@@ -1107,6 +1107,10 @@ fn config_dir_sources_run_with_an_isolated_home() {
             "client-b/.claude/.credentials.json",
             r#"{"claudeAiOauth":{"accessToken":"synthetic-client-b"}}"#,
         ),
+        (
+            ".grok-multi/auth.json",
+            r#"{"https://auth.x.ai::user-a":{"key":"synthetic-grok-a","expires_at":"2099-01-01T00:00:00Z","email":"a@example.com"},"https://auth.x.ai::user-b":{"key":"synthetic-grok-b","expires_at":"2099-01-01T00:00:00Z","email":"b@example.com"}}"#,
+        ),
         ("not-a-dir", "file"),
     ];
     for (relative, bytes) in fixtures {
@@ -1144,7 +1148,8 @@ async fn config_dir_sources_child() {
     assert_eq!(std::env::var("HOME").unwrap(), home);
     let (mut state, dir, _) = fixture().await;
     Arc::get_mut(&mut state).unwrap().no_saved_accounts = false;
-    state.settings.write().await.values.enabled_providers = vec!["codex".into(), "claude".into()];
+    state.settings.write().await.values.enabled_providers =
+        vec!["codex".into(), "claude".into(), "grok".into()];
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let token = "synthetic-management-token-1234567890";
@@ -1205,6 +1210,41 @@ async fn config_dir_sources_child() {
                 done(&state, operation["id"].as_str().unwrap()).await;
             }
         }
+    }
+    let response = post(
+        "grok-multi-unselected".into(),
+        json!({"kind":"grok_native","config_dir":"~/.grok-multi"}),
+    )
+    .await
+    .unwrap();
+    let operation: Value = response.json().await.unwrap();
+    let failed =
+        serde_json::to_value(done(&state, operation["id"].as_str().unwrap()).await).unwrap();
+    assert_eq!(failed["error"], "entry_required", "{failed}");
+    let discovered: Value = client
+        .post(format!("{base}/v2/sources/discover"))
+        .bearer_auth(token)
+        .json(&json!({"provider":"grok","kind":"grok_native","inspect":true,"config_dir":"~/.grok-multi"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let candidates = discovered["candidates"].as_array().unwrap();
+    assert_eq!(
+        candidates.iter().map(|c| &c["label"]).collect::<Vec<_>>(),
+        ["a@example.com", "b@example.com"]
+    );
+    assert!(!discovered.to_string().contains("synthetic-"));
+    for (index, candidate) in candidates.iter().enumerate() {
+        let response = post(format!("grok-multi-{index}"), candidate["source"].clone())
+            .await
+            .unwrap();
+        let operation: Value = response.json().await.unwrap();
+        let completed =
+            serde_json::to_value(done(&state, operation["id"].as_str().unwrap()).await).unwrap();
+        assert_eq!(completed["status"], "completed", "{completed}");
     }
     let vault = state.vault.as_ref().unwrap();
     let registered: Vec<_> = vault

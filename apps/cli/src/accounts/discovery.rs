@@ -21,6 +21,9 @@ pub struct Request {
     pub domain: Option<QuotioDomain>,
     #[serde(default)]
     pub inspect: bool,
+    /// A custom `GROK_HOME`; candidates are then registrable inputs, one per login.
+    #[serde(default)]
+    pub config_dir: Option<super::sources::ConfigDir>,
 }
 #[derive(Clone)]
 pub enum Reference {
@@ -140,6 +143,7 @@ impl Registry {
             location,
             domain: None,
             inspect: true,
+            config_dir: None,
         })?;
         let mut candidates: Vec<Value> = inspected["candidates"]
             .as_array()
@@ -177,7 +181,20 @@ impl Registry {
             location,
             domain,
             inspect,
+            config_dir,
         } = request;
+        if let Some(dir) = config_dir {
+            if kind != "grok_native" || location.is_some() || domain.is_some() || !inspect {
+                return Err(AccountError::Input);
+            }
+            let candidates: Vec<Value> = GrokNativeReference::entries_in(&dir)?
+                .into_iter()
+                .map(|(entry_key, label)| {
+                    json!({"label":label,"status":"available","source":{"kind":kind,"config_dir":dir.as_str(),"entry_key":entry_key}})
+                })
+                .collect();
+            return Ok(json!({"schema_version":2,"status":"checked","candidates":candidates}));
+        }
         if !crate::providers::capabilities::capability(provider)
             .source_references
             .iter()

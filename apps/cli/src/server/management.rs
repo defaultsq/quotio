@@ -25,6 +25,7 @@ pub(crate) fn account_code(error: &AccountError) -> &'static str {
         AccountError::IdempotencyFull => "idempotency_full",
         AccountError::NotFound => "account_not_found",
         AccountError::Duplicate => "duplicate_account",
+        AccountError::EntryRequired => "entry_required",
         AccountError::Label => "invalid_label",
         AccountError::Settings => "invalid_provider_settings",
         AccountError::NativeOAuth(_) => "native_login_required",
