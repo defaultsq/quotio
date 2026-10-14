@@ -1,6 +1,5 @@
 import QuotioApplication
 import QuotioDomain
-import SwiftUI
 
 extension AccountRowData {
     @MainActor var sourceLabel: String {
@@ -42,52 +41,17 @@ extension QuotaRefreshIssue {
     }
 }
 
-enum ProviderConnectionState {
-    case available, configured, permissionRequired, disabled, attention
-
-    static func resolve(
-        hasAccounts: Bool, hasEnabledAccounts: Bool, needsPermission: Bool, hasIssue: Bool
-    ) -> Self {
-        if hasAccounts && !hasEnabledAccounts { return .disabled }
-        if needsPermission { return .permissionRequired }
-        if hasAccounts { return hasIssue ? .attention : .configured }
-        return .available
-    }
-
-    var localizationKey: String {
-        switch self {
-        case .available: "connections.available"
-        case .configured: "connections.configured"
-        case .permissionRequired: "providers.nativePermission.title"
-        case .disabled: "connections.disabled"
-        case .attention: "connections.attention"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .available: "plus.circle"
-        case .configured: "checkmark.circle"
-        case .permissionRequired: "lock"
-        case .disabled: "pause.circle"
-        case .attention: "exclamationmark.triangle"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .available, .disabled: .secondary
-        case .configured: .green
-        case .permissionRequired, .attention: .orange
-        }
-    }
-}
-
-extension QuotaProvider {
-    var hasDiscoverableNativeLogin: Bool {
-        switch self {
-        case .amp, .antigravity, .claude, .codex, .copilot, .cursor, .devin, .factoryDroid, .grok, .kiro: true
-        default: false
+extension NativeSourcePermission {
+    var explanationLocalizationKey: String {
+        switch (kind, location) {
+        case ("antigravity_native", "gemini_keychain"):
+            "providers.nativePermission.antigravity"
+        case ("factory_native", _):
+            "providers.nativePermission.factory"
+        case ("claude_native", "code_keychain"):
+            "providers.nativePermission.claude"
+        default:
+            "providers.nativePermission.message"
         }
     }
 }
