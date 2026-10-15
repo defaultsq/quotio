@@ -1,0 +1,140 @@
+name: Desktop release
+
+on:
+  push:
+    tags: ['desktop-v*']
+
+defaults:
+  run:
+    shell: bash
+    working-directory: apps/desktop
+
+permissions: {}
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Bundle on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    environment: release
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            bundles: deb,rpm,appimage
+            artifacts: |
+              apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+              apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm
+              apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+              apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage.sig
+          - os: windows-2025
+            bundles: nsis
+            artifacts: |
+              apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+              apps/desktop/src-tauri/target/release/bundle/nsis/*.exe.sig
+    env:
+      CARGO_TERM_COLOR: never
+      BUNDLES: ${{ matrix.bundles }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate tag against app version
+        run: |
+          [[ "$TAG" =~ ^desktop-v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]
+          version=$(node -p 'require("./src-tauri/tauri.conf.json").version')
+          test "desktop-v$version" = "$TAG"
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev libdbus-1-dev build-essential file
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12.11.2
+          package_json_file: apps/desktop/package.json
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build sidecar
+        run: pnpm sidecar --release
+      - name: Import Windows signing certificate
+        id: windows-certificate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) {
+            Write-Output "::warning::WINDOWS_CERTIFICATE is not set; the Windows installer and executables are unsigned."
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'quotio-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+      - name: Build bundles
+        env:
+          CERTIFICATE_THUMBPRINT: ${{ steps.windows-certificate.outputs.thumbprint }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          args=(--bundles "$BUNDLES")
+          if [[ -n "$CERTIFICATE_THUMBPRINT" ]]; then
+            args+=(--config "{\"bundle\":{\"windows\":{\"certificateThumbprint\":\"$CERTIFICATE_THUMBPRINT\",\"digestAlgorithm\":\"sha256\",\"timestampUrl\":\"http://timestamp.digicert.com\"}}}")
+          fi
+          if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            args+=(--config '{"bundle":{"createUpdaterArtifacts":true}}')
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set; no updater signatures are produced."
+          fi
+          pnpm tauri build "${args[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bundle-${{ runner.os }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+          retention-days: 7
+
+  draft:
+    name: Assemble draft release
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 10
+    permissions:
+      contents: write # Required to create the draft GitHub release.
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: bundle-*
+          path: release-output
+          merge-multiple: true
+      - name: Create draft GitHub release
+        working-directory: release-output
+        run: |
+          sha256sum -- * > SHA256SUMS
+          version=${TAG#desktop-v}
+          args=()
+          if [[ "$version" == *-* ]]; then args+=(--prerelease); fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --latest=false \
+            --title "Quotio Desktop v$version" --generate-notes "${args[@]}" -- *
