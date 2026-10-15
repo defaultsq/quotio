@@ -16,6 +16,9 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&path).unwrap();
+        // HOME below must not cross a symlink such as macOS's /var, or the default
+        // CLIProxyAPI directory under it fails validation.
+        let path = path.canonicalize().unwrap();
         std::fs::write(path.join("config.toml"), "enabled_providers = ['codex']\n").unwrap();
         std::fs::write(path.join("login"), "first@example.test").unwrap();
         std::fs::write(path.join("codex"), r#"#!/usr/bin/python3
@@ -40,11 +43,17 @@ for line in sys.stdin:
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path.join("codex"), std::fs::Permissions::from_mode(0o700))
             .unwrap();
+        // A keyless host collects codex only where discovery finds an auth.json. The fake
+        // binary above owns the login, and a file without tokens keeps the adapter from
+        // fetching ChatGPT supplements over the network.
+        std::fs::create_dir_all(path.join("codex-home")).unwrap();
+        std::fs::write(path.join("codex-home/auth.json"), "{}").unwrap();
         Self(path)
     }
     fn command(&self) -> Command {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_quotio"));
         cmd.env("PATH", &self.0)
+            .env("HOME", &self.0)
             .env("CODEX_HOME", self.0.join("codex-home"))
             .env("QUOTIO_CACHE_DIR", self.0.join("cache"));
         cmd
