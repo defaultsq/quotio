@@ -14,7 +14,7 @@
     "notification:allow-notify",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://github.com/*" }, { "url": "https://www.quotio.dev/*" }]
+      "allow": [{ "url": "https://github.com/*" }, { "url": "https://www.quotio.dev/*" }, { "url": "http://127.0.0.1:*/*" }]
     },
     "os:allow-hostname",
     "store:allow-load",

@@ -35,10 +35,12 @@ type ShellProps = {
   page: PageId;
   onNavigate: (page: PageId) => void;
   badges: Partial<Record<PageId, number>>;
+  /** A small dot for a page whose service is on, such as a running proxy. */
+  indicators?: Partial<Record<PageId, boolean>>;
   children: ReactNode;
 };
 
-export function Shell({ page, onNavigate, badges, children }: ShellProps) {
+export function Shell({ page, onNavigate, badges, indicators = {}, children }: ShellProps) {
   return (
     <div className="flex h-full gap-1.5 bg-bg-weak-50 p-1.5">
       <nav className="flex w-[240px] shrink-0 flex-col gap-4 p-3.5">
@@ -48,7 +50,14 @@ export function Shell({ page, onNavigate, badges, children }: ShellProps) {
               <div className="flex h-6 items-center px-2 text-xs font-medium text-text-soft-400">{section.title}</div>
             )}
             {section.items.map((id) => (
-              <NavItem key={id} id={id} active={id === page} badge={badges[id]} onSelect={() => onNavigate(id)} />
+              <NavItem
+                key={id}
+                id={id}
+                active={id === page}
+                badge={badges[id]}
+                indicator={indicators[id]}
+                onSelect={() => onNavigate(id)}
+              />
             ))}
           </div>
         ))}
@@ -60,7 +69,9 @@ export function Shell({ page, onNavigate, badges, children }: ShellProps) {
   );
 }
 
-function NavItem({ id, active, badge, onSelect }: { id: PageId; active: boolean; badge?: number; onSelect: () => void }) {
+type NavItemProps = { id: PageId; active: boolean; badge?: number; indicator?: boolean; onSelect: () => void };
+
+function NavItem({ id, active, badge, indicator, onSelect }: NavItemProps) {
   const { label, icon: Icon } = pages[id];
   return (
     <button
@@ -78,6 +89,8 @@ function NavItem({ id, active, badge, onSelect }: { id: PageId; active: boolean;
         <span className="flex min-w-[18px] justify-center rounded-[5px] bg-alpha-red-10 px-1.5 py-0.5 text-[11px] font-semibold text-state-error">
           {badge}
         </span>
+      ) : indicator ? (
+        <span className="size-1.5 rounded-full bg-primary-base" />
       ) : null}
     </button>
   );

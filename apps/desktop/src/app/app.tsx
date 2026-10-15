@@ -6,6 +6,8 @@ import { useQuotaAlerts } from "@/features/alerts/use-alerts";
 import { HistorySheet, type HistoryTarget } from "@/features/history/history-sheet";
 import { OpenHistoryContext } from "@/features/history/open-history";
 import { OnboardingDialog } from "@/features/onboarding/onboarding-dialog";
+import { ProxyPage } from "@/features/proxy/proxy-page";
+import { startProxyAtLaunch, useProxyStatus } from "@/features/proxy/queries";
 import { AboutPage } from "@/features/settings/about-page";
 import { GeneralPage } from "@/features/settings/general-page";
 import { NotificationsPage } from "@/features/settings/notifications-page";
@@ -20,6 +22,7 @@ import { pages, Shell, type PageId } from "./shell";
 const screens: Partial<Record<PageId, ComponentType>> = {
   accounts: AccountsPage,
   iphone: SharingPage,
+  cliproxy: ProxyPage,
   general: GeneralPage,
   tray: TrayPage,
   notifications: NotificationsPage,
@@ -35,8 +38,13 @@ export function App() {
   const [historyAccount, setHistoryAccount] = useState<string | null>(null);
   const { view } = useAccountsView();
   const { mutate: refresh } = useRefresh();
+  const proxy = useProxyStatus();
   useTrayTooltip(view);
   useQuotaAlerts(view);
+
+  useEffect(() => {
+    startProxyAtLaunch().catch((error) => console.error("CLIProxyAPI could not start", error));
+  }, []);
 
   useEffect(() => {
     const listeners = [
@@ -69,6 +77,7 @@ export function App() {
           setPage(next);
         }}
         badges={{ accounts: view?.attention.length }}
+        indicators={{ cliproxy: proxy.data?.state.kind === "running" }}
       >
         {page === "iphone" && pairRequest > 0 ? (
           <SharingPage key={pairRequest} pairOnOpen />
