@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useOpenHistory } from "@/features/history/open-history";
 import { AccountRow } from "./account-row";
 import { AttentionPanel } from "./attention-panel";
+import { FoundLogins } from "./found-logins";
 import { formatUpdated } from "./format";
 import { filterGroups, type ProviderGroup, type ProviderView } from "./model";
 import { useAccountsView, useRefresh } from "./queries";
@@ -175,14 +176,16 @@ function ConnectProviders({ providers }: { providers: ProviderView[] }) {
 function AddAccountDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add account</DialogTitle>
-          <DialogDescription>
-            Adding accounts from the desktop app is coming soon. Quotio already picks up logins from tools installed on
-            this computer, such as Claude Code and Codex.
+      <DialogContent className="gap-5 rounded-[20px] border-0 bg-bg-white-0 p-6 sm:max-w-[560px]">
+        <DialogHeader className="gap-1.5">
+          <DialogTitle className="text-lg leading-6 font-semibold tracking-[-0.27px] text-text-strong-950">Add account</DialogTitle>
+          <DialogDescription className="text-sm text-text-sub-600">
+            Logins your CLIs already use on this computer. Quotio reads them and never changes them.
           </DialogDescription>
         </DialogHeader>
+        <div className="max-h-[60vh] overflow-y-auto">
+          <FoundLogins />
+        </div>
       </DialogContent>
     </Dialog>
   );
