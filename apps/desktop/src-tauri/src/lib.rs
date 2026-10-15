@@ -1,6 +1,8 @@
+mod proxy;
 mod sidecar;
 mod tray;
 
+use proxy::Proxy;
 use sidecar::{ApiError, ApiResponse, Sidecar};
 use std::sync::Arc;
 use tauri::Manager;
@@ -30,6 +32,7 @@ pub fn run() {
                 .with_file_name(format!("quotio{}", std::env::consts::EXE_SUFFIX));
             let data_dir = app.path().app_data_dir()?;
             app.manage(Sidecar::start(binary, data_dir));
+            app.manage(Proxy::new(app.handle())?);
             tray::setup(app.handle())?;
             Ok(())
         })
@@ -40,13 +43,22 @@ pub fn run() {
             tray::close_popover,
             tray::quit,
             tray::fit_popover,
-            tray::set_tray_tooltip
+            tray::set_tray_tooltip,
+            proxy::proxy_status,
+            proxy::proxy_releases,
+            proxy::proxy_install,
+            proxy::proxy_activate,
+            proxy::proxy_start,
+            proxy::proxy_restart,
+            proxy::proxy_stop,
+            proxy::proxy_management_key
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Quotio desktop app")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 app.state::<Arc<Sidecar>>().stop();
+                app.state::<Arc<Proxy>>().shutdown();
             }
         });
 }
