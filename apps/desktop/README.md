@@ -28,6 +28,43 @@ cargo check --manifest-path src-tauri/Cargo.toml
 pnpm sidecar --release && pnpm tauri build
 ```
 
+`pnpm sidecar` builds for the host target. Pass `--target <triple>` to stage a sidecar for another target, for example `x86_64-pc-windows-msvc`, which produces `src-tauri/binaries/quotio-x86_64-pc-windows-msvc.exe`.
+
+## Package and release
+
+`pnpm tauri build` writes installers to `src-tauri/target/release/bundle/`:
+
+- Linux: `deb`, `rpm`, and `appimage`. The deb depends on WebKitGTK 4.1, GTK 3, Ayatana AppIndicator, and libdbus, and recommends `gnome-keyring | kwallet6` for the [vault key](#linux-vault-key). The deb and rpm install the app as `/usr/bin/quotio-desktop` and the CLI sidecar as `/usr/bin/quotio`.
+- Windows: `nsis` (a per-user installer that downloads WebView2 when it is missing) and `msi`. CI builds only `nsis`, because MSI rejects prerelease versions such as `0.2.0-beta.1`.
+
+The **Desktop CI** workflow (`.github/workflows/desktop-ci.yml`) runs on changes to `apps/desktop` or `apps/cli`. On Ubuntu 24.04 and Windows Server 2025 it checks that `src/lib/api/schema.d.ts` matches `pnpm gen:api`, typechecks and builds the frontend, runs Clippy on `src-tauri`, and uploads the installers as workflow artifacts for 3 days.
+
+To release:
+
+1. Set the same version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `package.json`.
+2. Push a tag named `desktop-v<version>`, for example `desktop-v0.2.0` or `desktop-v0.2.0-beta.1`. Do not use the `v*` (macOS) or `cli-v*` (CLI) tag namespaces.
+3. The **Desktop release** workflow checks that the tag matches `tauri.conf.json`, builds the installers on both systems, and attaches them with a `SHA256SUMS` file to a draft GitHub release. The draft is never marked as the latest release, so the macOS release keeps that slot.
+4. Review the draft and publish it.
+
+CI builds the AppImage on Ubuntu 24.04, so it may not start on distributions with a glibc older than 2.39.
+
+### Signing
+
+The release workflow reads these secrets from the `release` environment. Each one is optional. When a secret is missing, the workflow logs a warning and builds unsigned output.
+
+- `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD`: an Authenticode code-signing certificate as a base64-encoded `.pfx` file and its password. The workflow imports it and passes its thumbprint to `tauri build`, which signs the app executable and the installer with SHA-256 and a DigiCert timestamp.
+- `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the updater signing key. With it, the workflow sets `bundle.createUpdaterArtifacts` and attaches a `.sig` file next to the AppImage and the NSIS installer.
+
+### Updater
+
+The app does not include the Tauri updater yet. To enable it:
+
+1. Run `pnpm tauri signer generate -w ~/.tauri/quotio-desktop.key`. Keep the private key and its password out of the repository, and store them as the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets.
+2. Add `tauri-plugin-updater` to the app, put the public key in `plugins.updater.pubkey` in `tauri.conf.json`, and grant `updater:default` in a capability.
+3. Choose an endpoint for `plugins.updater.endpoints` that serves a `latest.json` manifest. GitHub's `releases/latest/download/latest.json` does not work here, because the latest release belongs to the macOS app. Use a fixed release tag whose `latest.json` each desktop release replaces, GitHub Pages, or a server you run. Then extend the release workflow to write `latest.json` from the `.sig` files.
+
+On Linux the updater can replace only the AppImage. The deb and rpm update through the package manager.
+
 ## Architecture
 
 - The backend is the Quotio CLI, bundled as a sidecar (`bundle.externalBin`) and started as `quotio serve --manage --parent-pipe` with its own vault namespace, `quotio-desktop`.
