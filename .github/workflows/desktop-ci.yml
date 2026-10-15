@@ -1,0 +1,106 @@
+name: Desktop CI
+
+on:
+  pull_request:
+    paths:
+      - 'apps/desktop/**'
+      - 'apps/cli/**'
+      - '.github/workflows/desktop-ci.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'apps/desktop/**'
+      - 'apps/cli/**'
+      - '.github/workflows/desktop-ci.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+    working-directory: apps/desktop
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    name: Bundle on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            bundles: deb,rpm,appimage
+            artifacts: |
+              apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+              apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm
+              apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+          - os: windows-2025
+            bundles: nsis
+            artifacts: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+    env:
+      CARGO_TERM_COLOR: never
+      BUNDLES: ${{ matrix.bundles }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev libdbus-1-dev build-essential file
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12.11.2
+          package_json_file: apps/desktop/package.json
+          cache: true
+          cache_dependency_path: apps/desktop/pnpm-lock.yaml
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy
+      - name: Cache Cargo registry and build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            apps/cli/target
+            apps/desktop/src-tauri/target
+          key: desktop-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock', 'apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: desktop-${{ runner.os }}-
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check generated API types match the OpenAPI document
+        if: runner.os == 'Linux'
+        run: |
+          pnpm gen:api
+          git diff --exit-code -- src/lib/api/schema.d.ts
+      - name: Typecheck and build frontend
+        run: pnpm build
+      - name: Build sidecar
+        run: pnpm sidecar --release
+      - name: Lint Tauri host
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Build bundles
+        run: pnpm tauri build --bundles "$BUNDLES"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: quotio-desktop-${{ runner.os }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+          retention-days: 3
