@@ -69,7 +69,7 @@ On Linux the updater can replace only the AppImage. The deb and rpm update throu
 
 - The backend is the Quotio CLI, bundled as a sidecar (`bundle.externalBin`) and started as `quotio serve --manage --parent-pipe` with its own vault namespace, `quotio-desktop`.
 - `src-tauri/src/sidecar.rs` owns the child process. It writes the bootstrap token to stdin, reads the bound port from stdout, and closes stdin on exit to stop the server. If the child exits after startup, the app starts a new one with a new token. Restarts wait 1 s, then 2 s, 4 s, and so on up to 30 s. The wait goes back to 1 s after the child stays up for 60 s. Requests wait while the child restarts.
-- The webview calls one Tauri command, `api(method, path, body)`, which proxies `/v2/*` requests with the bearer token. The token never reaches the webview.
+- The webview calls one Tauri command, `api(method, path, body, idempotencyKey)`, which proxies `/v2/*` requests with the bearer token and, for mutations that need one, the `Idempotency-Key` header. The token never reaches the webview.
 - `src/lib/api` holds the generated OpenAPI types and the typed client. `src/features/accounts/model.ts` projects the snapshot into the view model that components render.
 - Host settings (refresh interval, login discovery) live in the host and go through `/v2/settings`. App preferences (theme, hidden names, notification alerts and the alerts already sent, launch at login, sharing listeners to restore, tray density and providers, the welcome-guide flag) live in `src/lib/preferences.ts`, one versioned record in the store plugin's `preferences.json`.
 - The host keeps iPhone sharing listeners in memory only, so the app re-enables the saved ones at launch.
