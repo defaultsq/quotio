@@ -27,6 +27,7 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
 const HEALTH_RETRY: Duration = Duration::from_millis(250);
 const EXIT_POLL: Duration = Duration::from_millis(500);
 const STOP_GRACE: Duration = Duration::from_secs(2);
+const PID_FILE: &str = "proxy.pid";
 
 #[derive(Clone, Serialize, PartialEq, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -271,7 +272,7 @@ impl Proxy {
 
     async fn launch(self: &Arc<Self>, port: u16) -> Result<()> {
         let version = self.active().ok_or("CLIProxyAPI isn’t installed.")?;
-        if port == 0 || TcpListener::bind(("127.0.0.1", port)).is_err() {
+        if port == 0 || (!port_free(port) && !self.reclaim_orphan(port).await) {
             return Err(format!("Port {port} is in use by another program. Choose another port."));
         }
         let management_key = config::prepare(&self.root, &self.auth_dir, port)
@@ -293,6 +294,9 @@ impl Proxy {
         }
         let child = command.spawn().map_err(|error| format!("Couldn’t launch CLIProxyAPI: {error}"))?;
         let pid = child.id();
+        if let Err(error) = fs::write(self.root.join(PID_FILE), pid.to_string()) {
+            eprintln!("quotio-desktop: cannot record the CLIProxyAPI PID: {error}");
+        }
         self.inner.lock().unwrap().child = Some(child);
         self.set_state(ProxyState::Starting { port });
         let watcher = self.clone();
@@ -312,6 +316,32 @@ impl Proxy {
             }
             tokio::time::sleep(HEALTH_RETRY).await;
         }
+    }
+
+    /// A proxy left behind when Quotio last quit without stopping it (a crash, a killed dev
+    /// session) still holds the port. It answers this config's management key only if it is
+    /// ours; then the PID recorded at its launch is stopped so the port frees up.
+    async fn reclaim_orphan(&self, port: u16) -> bool {
+        let Ok(key) = config::management_key(&self.root) else {
+            return false;
+        };
+        let pid = fs::read_to_string(self.root.join(PID_FILE)).ok().and_then(|pid| pid.trim().parse::<u32>().ok());
+        let Some(pid) = pid else {
+            return false;
+        };
+        if !self.healthy(port, &key).await {
+            return false;
+        }
+        eprintln!("quotio-desktop: stopping CLIProxyAPI {pid} left over from an earlier session");
+        let _ = tauri::async_runtime::spawn_blocking(move || terminate_pid(pid)).await;
+        let deadline = Instant::now() + STOP_GRACE;
+        while !port_free(port) {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(HEALTH_RETRY).await;
+        }
+        true
     }
 
     async fn healthy(&self, port: u16, management_key: &str) -> bool {
@@ -368,6 +398,7 @@ impl Proxy {
         let child = self.inner.lock().unwrap().child.take();
         if let Some(child) = child {
             let _ = tauri::async_runtime::spawn_blocking(move || terminate(child)).await;
+            let _ = fs::remove_file(self.root.join(PID_FILE));
         }
     }
 
@@ -375,6 +406,7 @@ impl Proxy {
     pub fn shutdown(&self) {
         if let Some(child) = self.inner.lock().unwrap().child.take() {
             terminate(child);
+            let _ = fs::remove_file(self.root.join(PID_FILE));
         }
     }
 
@@ -384,6 +416,37 @@ impl Proxy {
 
     pub fn management_key(&self) -> Result<String> {
         config::management_key(&self.root).map_err(|error| error.to_string())
+    }
+}
+
+fn port_free(port: u16) -> bool {
+    TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+/// Stops a process that is not our child, so it cannot be waited on: SIGTERM, then SIGKILL.
+fn terminate_pid(pid: u32) {
+    #[cfg(unix)]
+    {
+        let pid = pid as libc::pid_t;
+        // SAFETY: kill(2) on a PID from our own pid file; signal 0 only probes whether it still exists.
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+        let deadline = Instant::now() + STOP_GRACE;
+        while Instant::now() < deadline {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
     }
 }
 
