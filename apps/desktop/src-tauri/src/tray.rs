@@ -50,12 +50,12 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     let popover = WebviewWindowBuilder::new(app, POPOVER, WebviewUrl::App("index.html".into()))
         .title("Quotio")
         .inner_size(POPOVER_WIDTH, 520.0)
-        .resizable(false)
+        // GTK drops `set_size` on a non-resizable window, which `fit_popover` needs on Linux.
+        .resizable(cfg!(target_os = "linux"))
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(false)
-        .focused(false)
         .build()?;
     let handle = app.clone();
     popover.on_window_event(move |event| {
