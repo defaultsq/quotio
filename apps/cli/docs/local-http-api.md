@@ -239,7 +239,7 @@ Already-started reads may finish.
 
 ## Native parent bootstrap
 
-`serve --manage --parent-pipe --listen 127.0.0.1:0` uses an inherited Unix stdin pipe.
+`serve --manage --parent-pipe --listen 127.0.0.1:0` uses an inherited stdin pipe: a FIFO on Unix, an anonymous or named pipe on Windows.
 Within five seconds the parent sends one JSON object followed by LF, at most 16 KiB:
 `token` holds the bearer token; optional `preferences` carries
 `disabled_providers`, `automatically_discover_logins` and `refresh_interval`.

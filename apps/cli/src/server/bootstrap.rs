@@ -8,6 +8,54 @@ pub struct Parent {
     preferences: Option<crate::settings::NativePreferences>,
     #[cfg(unix)]
     input: tokio::net::unix::pipe::Receiver,
+    #[cfg(windows)]
+    input: tokio::io::DuplexStream,
+}
+#[cfg(unix)]
+fn parent_input() -> Result<tokio::net::unix::pipe::Receiver, ServerError> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    // Own only a duplicate; never close the application's original stdin.
+    let fd = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_DUPFD_CLOEXEC, 3) };
+    if fd < 0 {
+        return Err(ServerError::Initialize);
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    tokio::net::unix::pipe::Receiver::from_owned_fd(fd).map_err(|_| ServerError::Initialize)
+}
+#[cfg(windows)]
+fn parent_input() -> Result<tokio::io::DuplexStream, ServerError> {
+    use std::{
+        io::Read,
+        os::windows::io::{AsHandle, AsRawHandle},
+    };
+    use tokio::io::AsyncWriteExt;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_TYPE_PIPE, GetFileType};
+    // Own only a duplicate; never close the application's original stdin.
+    let handle = std::io::stdin()
+        .as_handle()
+        .try_clone_to_owned()
+        .map_err(|_| ServerError::Initialize)?;
+    // Matches the Unix FIFO requirement: a console or file is not a parent.
+    if unsafe { GetFileType(handle.as_raw_handle()) } != FILE_TYPE_PIPE {
+        return Err(ServerError::Initialize);
+    }
+    let mut pipe = std::fs::File::from(handle);
+    // Anonymous pipes cannot join Tokio's reactor. A detached thread performs
+    // the blocking reads so a pending read never delays process exit.
+    let (input, mut output) = tokio::io::duplex(4096);
+    let runtime = tokio::runtime::Handle::current();
+    std::thread::Builder::new()
+        .name("parent-pipe".into())
+        .spawn(move || {
+            let mut buffer = [0; 4096];
+            while let Ok(read @ 1..) = pipe.read(&mut buffer) {
+                if runtime.block_on(output.write_all(&buffer[..read])).is_err() {
+                    break;
+                }
+            }
+        })
+        .map_err(|_| ServerError::Initialize)?;
+    Ok(input)
 }
 impl Parent {
     pub async fn open() -> Result<Self, ServerError> {
@@ -15,17 +63,9 @@ impl Parent {
         if std::env::var_os("QUOTIO_SERVER_TOKEN").is_some() {
             return Err(ServerError::Security);
         }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            use std::os::fd::{FromRawFd, OwnedFd};
-            // Own only a duplicate; never close the application's original stdin.
-            let fd = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_DUPFD_CLOEXEC, 3) };
-            if fd < 0 {
-                return Err(ServerError::Initialize);
-            }
-            let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-            let mut input = tokio::net::unix::pipe::Receiver::from_owned_fd(fd)
-                .map_err(|_| ServerError::Initialize)?;
+            let mut input = parent_input()?;
             let handshake =
                 tokio::time::timeout(Duration::from_secs(5), read_handshake(&mut input))
                     .await
@@ -36,7 +76,7 @@ impl Parent {
                 input,
             })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         Err(ServerError::Initialize)
     }
     pub fn take_preferences(&mut self) -> Option<crate::settings::NativePreferences> {
@@ -46,7 +86,7 @@ impl Parent {
         std::mem::take(&mut self.token)
     }
     pub async fn closed(&mut self) {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             // EOF, read failure, or unexpected extra input ends the parent session.
             let _ = self.input.read_u8().await;
