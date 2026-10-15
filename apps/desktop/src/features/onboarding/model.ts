@@ -1,15 +1,16 @@
 // Projects what the host knows and what it can find on this computer onto the welcome guide's Connect step.
 import type { AccountsView, ProviderView } from "@/features/accounts/model";
-import type { Provider, ProviderId, SourceInspection, SourceKind } from "@/lib/api/client";
+import type { Provider, ProviderId, SourceInput, SourceInspection, SourceKind } from "@/lib/api/client";
 
 export type Inspection = { provider: ProviderId; result: SourceInspection };
 
-/** One provider row: connected already, found and ready to add, or found but locked. */
-export type FoundProvider = {
-  provider: ProviderView;
-  status: "connected" | "found" | "needs_access";
-  detail: string;
-};
+/** One login an inspection found; `source` registers exactly that login. */
+export type FoundLogin = { label: string; source: SourceInput };
+
+/** One provider: connected already, with logins ready to add one at a time, or found but locked. */
+export type FoundProvider =
+  | { provider: ProviderView; status: "connected" | "needs_access"; detail: string }
+  | { provider: ProviderView; status: "found"; logins: FoundLogin[] };
 
 export type ConnectView = { found: FoundProvider[]; others: ProviderView[] };
 
@@ -41,8 +42,13 @@ export function projectConnect(view: AccountsView, inspections: readonly Inspect
     const status = (candidate: (typeof candidates)[number]) => candidate.status as string;
     const available = candidates.filter((candidate) => status(candidate) === "available");
     if (available.length > 0) {
-      const labels = available.map((candidate) => candidate.label);
-      found.push({ provider, status: "found", detail: labels.join(", ") });
+      const repeated = (label: string) => available.filter((candidate) => candidate.label === label).length > 1;
+      // The host labels file logins generically, so its location tells two of them apart.
+      const logins = available.map(({ label, source }) => ({
+        label: repeated(label) && "location" in source && source.location ? `${label} (${source.location})` : label,
+        source,
+      }));
+      found.push({ provider, status: "found", logins });
     } else if (candidates.some((candidate) => status(candidate) === "permission_required")) {
       found.push({ provider, status: "needs_access", detail: "Found, but your system hasn’t let Quotio read it." });
     }

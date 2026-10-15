@@ -250,6 +250,7 @@ impl Sidecar {
         method: &str,
         path: &str,
         body: Option<serde_json::Value>,
+        idempotency_key: Option<&str>,
     ) -> Result<ApiResponse, ApiError> {
         let method = match method {
             "GET" => reqwest::Method::GET,
@@ -260,11 +261,17 @@ impl Sidecar {
             other => return Err(ApiError::InvalidRequest(format!("unsupported method {other}"))),
         };
         validate_path(path)?;
+        if let Some(key) = idempotency_key {
+            validate_idempotency_key(key)?;
+        }
         let (base_url, token) = self.ready().await?;
         let mut request = self
             .http
             .request(method, format!("{base_url}{path}"))
             .bearer_auth(token);
+        if let Some(key) = idempotency_key {
+            request = request.header("Idempotency-Key", key);
+        }
         if let Some(body) = body {
             request = request.json(&body);
         }
@@ -318,6 +325,14 @@ fn validate_path(path: &str) -> Result<(), ApiError> {
         || path.split('/').any(|segment| segment == ".." || segment == ".")
     {
         return Err(ApiError::InvalidRequest(format!("path {path} is not a /v2/ route")));
+    }
+    Ok(())
+}
+
+/// The host's rule for account and source writes: 1–128 visible ASCII characters.
+fn validate_idempotency_key(key: &str) -> Result<(), ApiError> {
+    if key.is_empty() || key.len() > 128 || !key.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Err(ApiError::InvalidRequest("the idempotency key is invalid".into()));
     }
     Ok(())
 }

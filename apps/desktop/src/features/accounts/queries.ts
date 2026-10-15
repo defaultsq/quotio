@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Operation, type ProviderId, type RefreshRequest } from "@/lib/api/client";
+import { api, ApiError, type Operation, type ProviderId, type RefreshRequest, type SourceInput } from "@/lib/api/client";
 import { projectAccounts } from "./model";
 
 // Snapshot reads never fetch provider quota, so polling is cheap; the host schedules refreshes.
@@ -52,20 +52,37 @@ export function useDiscovery() {
 type ScanRequest = {
   /** Omitted: every tracked provider. */
   providers?: ProviderId[];
-  /** Registers logins the user removed earlier too; only for an explicit "Add". */
-  restoreRemoved?: boolean;
 };
 
 /** Scans providers for logins already on this computer, registers them, then re-reads what the scan found. */
 export function useScan() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: async (request: ScanRequest = {}) => settle(await api.discover(request.providers, request.restoreRemoved)),
+    mutationFn: async (request: ScanRequest = {}) => settle(await api.discover(request.providers)),
     onSettled: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: keys.discovery }),
         client.invalidateQueries({ queryKey: keys.snapshot }),
       ]),
+  });
+}
+
+/**
+ * Registers one login an inspection found, then re-reads the snapshot. The caller keeps
+ * `idempotencyKey` for one user action and sends it again when that action is retried.
+ */
+export function useAddSource() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ source, idempotencyKey }: { source: SourceInput; idempotencyKey: string }) => {
+      const operation = await settle(await api.addSource(source, idempotencyKey));
+      if (operation.status === "failed") {
+        const code = operation.error ?? "unknown";
+        throw new ApiError({ kind: "operation_failed", code, message: operation.message ?? code });
+      }
+      return operation;
+    },
+    onSettled: () => client.invalidateQueries({ queryKey: keys.snapshot }),
   });
 }
 

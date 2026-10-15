@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useRef, useState, type ReactNode } from "react";
 import {
   RiCheckLine,
   RiCheckboxCircleFill,
@@ -15,10 +15,11 @@ import { ProviderLogo } from "@/components/provider-logo";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAccountsView, useScan } from "@/features/accounts/queries";
+import type { ProviderView } from "@/features/accounts/model";
+import { useAccountsView, useAddSource, useScan } from "@/features/accounts/queries";
 import { updatePreferences, usePreferences } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
-import { projectConnect, type FoundProvider } from "./model";
+import { projectConnect, type FoundLogin, type FoundProvider } from "./model";
 import { useInspections } from "./queries";
 
 const steps = [
@@ -173,7 +174,7 @@ function Connect({ onBack, onNext }: { onBack: () => void; onNext: () => void })
               Sign in to Claude Code, Codex or another supported tool, then scan again.
             </p>
           ) : (
-            connect.found.map((row) => <FoundRow key={row.provider.id} row={row} onRescan={() => void inspections.refetch()} />)
+            connect.found.map((row) => <FoundRows key={row.provider.id} row={row} onRescan={() => void inspections.refetch()} />)
           )}
           <div className="flex items-center gap-1.5 rounded-b-2xl border-t border-stroke-soft-200 bg-bg-weak-50 px-4 py-2.5 text-xs leading-4 text-text-sub-600">
             <span className="flex-1">
@@ -218,40 +219,65 @@ function Connect({ onBack, onNext }: { onBack: () => void; onNext: () => void })
   );
 }
 
-function FoundRow({ row, onRescan }: { row: FoundProvider; onRescan: () => void }) {
-  const scan = useScan();
-  const providerId = row.provider.refreshId;
+function FoundRows({ row, onRescan }: { row: FoundProvider; onRescan: () => void }) {
+  if (row.status === "found") {
+    return row.logins.map((login) => (
+      <LoginRow key={JSON.stringify(login.source)} provider={row.provider} login={login} onAdded={onRescan} />
+    ));
+  }
   return (
-    <div className="flex items-center gap-3 border-b border-stroke-soft-200 px-4 py-3 last:border-b-0">
-      <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-bg-weak-50">
-        <ProviderLogo provider={row.provider} className="size-4" />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-sm leading-5 font-medium text-text-strong-950">{row.provider.name}</span>
-        <span className="truncate text-xs leading-4 text-text-sub-600">{scan.error ? `Couldn’t add it. ${scan.error.message}` : row.detail}</span>
-      </span>
+    <ProviderRow provider={row.provider} detail={row.detail}>
       {row.status === "connected" ? (
         <span className="flex items-center gap-1 text-xs leading-4 font-medium text-state-stable">
           <RiCheckboxCircleFill className="size-3.5" />
           Ready
         </span>
-      ) : row.status === "needs_access" ? (
+      ) : (
         <span className="flex items-center gap-1 rounded-full bg-alpha-away-10 px-2 py-0.5 text-xs leading-4 font-medium text-state-away">
           <RiErrorWarningLine className="size-3.5" />
           Needs access
         </span>
-      ) : (
-        providerId && (
-          <Button
-            variant="raised"
-            size="sm"
-            disabled={scan.isPending}
-            onClick={() => scan.mutate({ providers: [providerId], restoreRemoved: true }, { onSettled: onRescan })}
-          >
-            {scan.isPending ? "Adding…" : "Add"}
-          </Button>
-        )
       )}
+    </ProviderRow>
+  );
+}
+
+function LoginRow({ provider, login, onAdded }: { provider: ProviderView; login: FoundLogin; onAdded: () => void }) {
+  const add = useAddSource();
+  // One key per attempt to add this login, so a retry after a lost response registers it once.
+  const idempotencyKey = useRef<string | null>(null);
+  const submit = () => {
+    idempotencyKey.current ??= crypto.randomUUID();
+    add.mutate(
+      { source: login.source, idempotencyKey: idempotencyKey.current },
+      {
+        onSuccess: () => {
+          idempotencyKey.current = null;
+          onAdded();
+        },
+      },
+    );
+  };
+  return (
+    <ProviderRow provider={provider} detail={add.error ? `Couldn’t add it. ${add.error.message}` : login.label}>
+      <Button variant="raised" size="sm" disabled={add.isPending} onClick={submit}>
+        {add.isPending ? "Adding…" : "Add"}
+      </Button>
+    </ProviderRow>
+  );
+}
+
+function ProviderRow({ provider, detail, children }: { provider: ProviderView; detail: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 border-b border-stroke-soft-200 px-4 py-3 last:border-b-0">
+      <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-bg-weak-50">
+        <ProviderLogo provider={provider} className="size-4" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="text-sm leading-5 font-medium text-text-strong-950">{provider.name}</span>
+        <span className="truncate text-xs leading-4 text-text-sub-600">{detail}</span>
+      </span>
+      {children}
     </div>
   );
 }

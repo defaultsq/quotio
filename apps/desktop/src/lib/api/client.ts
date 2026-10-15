@@ -29,6 +29,7 @@ export type HistoryBin = Schemas["QuotaHistoryBin"];
 export type HistoryEvent = Schemas["QuotaHistoryEvent"];
 export type SourceKind = Schemas["SourceDiscoveryInput"]["kind"];
 export type SourceInspection = Schemas["SourceDiscoveryResult"];
+export type SourceInput = Schemas["AccountSourceInput"];
 export type ClientCreated = Schemas["ClientCreated"];
 
 /** Why a request failed, as the UI needs to tell the cases apart. */
@@ -37,6 +38,7 @@ export type ApiFailure =
   | { kind: "transport"; message: string }
   | { kind: "invalid_request"; message: string }
   | { kind: "http"; status: number; code: string }
+  | { kind: "operation_failed"; code: string; message: string }
   | { kind: "invalid_response"; message: string };
 
 export class ApiError extends Error {
@@ -49,10 +51,10 @@ export class ApiError extends Error {
 
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
-async function request(method: Method, path: `/v2/${string}`, body?: unknown): Promise<unknown> {
+async function request(method: Method, path: `/v2/${string}`, body?: unknown, idempotencyKey?: string): Promise<unknown> {
   let response: { status: number; body: unknown };
   try {
-    response = await invoke("api", { method, path, body });
+    response = await invoke("api", { method, path, body, idempotencyKey });
   } catch (error) {
     throw new ApiError(parseCommandError(error));
   }
@@ -161,7 +163,12 @@ export const api = {
       await request("POST", "/v2/sources/discover", { provider, kind, inspect: true }),
       (body) => Array.isArray(body.candidates),
     ),
-  /** Scans providers and registers the logins found; `restore_removed` brings back ones the user removed. */
-  discover: async (providers: ProviderId[] = [], restoreRemoved = false) =>
-    parseOperation(await request("POST", "/v2/discovery", { providers, restore_removed: restoreRemoved })),
+  /** Scans providers and registers the logins found, except ones the user removed. */
+  discover: async (providers: ProviderId[] = []) => parseOperation(await request("POST", "/v2/discovery", { providers })),
+  /**
+   * Registers one login an inspection found. `idempotencyKey` names the user's action:
+   * a retry of the same action sends the same key, so the host registers it once.
+   */
+  addSource: async (source: SourceInput, idempotencyKey: string) =>
+    parseOperation(await request("POST", "/v2/sources", source, idempotencyKey)),
 };

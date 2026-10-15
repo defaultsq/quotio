@@ -14,8 +14,11 @@ async fn api(
     method: String,
     path: String,
     body: Option<serde_json::Value>,
+    idempotency_key: Option<String>,
 ) -> Result<ApiResponse, ApiError> {
-    sidecar.request(&method, &path, body).await
+    sidecar
+        .request(&method, &path, body, idempotency_key.as_deref())
+        .await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
