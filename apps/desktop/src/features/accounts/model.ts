@@ -3,6 +3,7 @@
 import type {
   Account,
   ConnectionState,
+  HostStatus,
   Issue,
   Metric,
   Provider,
@@ -42,7 +43,8 @@ export type MetricView = {
 
 export type AttentionItem = {
   key: string;
-  provider: ProviderView;
+  /** Null when the item concerns the host rather than one provider. */
+  provider: ProviderView | null;
   account: Account | null;
   title: string;
   detail: string;
@@ -74,9 +76,22 @@ export type AccountsView = {
   unconnected: ProviderView[];
   /** Whether this host keeps quota history, and why not when it can't. */
   history: { readable: boolean; writable: boolean; reason: string | null };
+  /** Why "Add account" can't work right now, or null when it can. */
+  addAccountBlocked: string | null;
 };
 
-export function projectAccounts(snapshot: Snapshot, providers: Provider[]): AccountsView {
+// The host serves only logins found on this computer when no Secret Service holds its vault key.
+const LOCKED_STORAGE: AttentionItem = {
+  key: "host:account-storage",
+  provider: null,
+  account: null,
+  title: "Saved accounts are locked",
+  detail: "Saving accounts needs a Secret Service such as GNOME Keyring or KWallet. Logins found on this computer still work.",
+  severity: "warning",
+  retry: null,
+};
+
+export function projectAccounts(snapshot: Snapshot, providers: Provider[], status: HostStatus): AccountsView {
   const usageByAccount = new Map(snapshot.usage.map((usage) => [usage.account_id, usage]));
   const providerById = new Map<string, ProviderView>(providers.map((provider) => [provider.id, providerView(provider)]));
   const providerFor = (id: string): ProviderView =>
@@ -88,7 +103,7 @@ export function projectAccounts(snapshot: Snapshot, providers: Provider[]): Acco
   }
 
   const groups: ProviderGroup[] = [];
-  const attention: AttentionItem[] = [];
+  const attention: AttentionItem[] = status.account_storage_enabled ? [] : [LOCKED_STORAGE];
   for (const [providerId, issue] of Object.entries(snapshot.provider_issues ?? {})) {
     attention.push(providerAttention(providerFor(providerId), issue));
   }
@@ -115,6 +130,7 @@ export function projectAccounts(snapshot: Snapshot, providers: Provider[]): Acco
       writable: snapshot.host.capabilities.quota_history_write?.available ?? false,
       reason: snapshot.host.capabilities.quota_history_write?.reason ?? snapshot.host.capabilities.quota_history?.reason ?? null,
     },
+    addAccountBlocked: status.account_storage_enabled ? null : LOCKED_STORAGE.detail,
   };
 }
 

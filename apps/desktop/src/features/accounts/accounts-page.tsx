@@ -49,7 +49,13 @@ export function AccountsPage() {
           <RiRefreshLine className={cn(refresh.isPending && "animate-spin")} />
           Refresh
         </Button>
-        <Button variant="inverse" size="sm" onClick={() => setAdding(true)}>
+        <Button
+          variant="inverse"
+          size="sm"
+          disabled={Boolean(view?.addAccountBlocked)}
+          title={view?.addAccountBlocked ?? undefined}
+          onClick={() => setAdding(true)}
+        >
           <RiAddLine />
           Add account
         </Button>
@@ -59,20 +65,24 @@ export function AccountsPage() {
         <LoadError error={error} onRetry={retry} />
       ) : isPending || !view ? (
         <LoadingGroups />
-      ) : view.accountCount === 0 ? (
-        <EmptyState onAdd={() => setAdding(true)} />
       ) : (
         <>
           <AttentionPanel items={view.attention} />
-          <div className="flex w-full flex-col gap-5">
-            {groups.map((group) => (
-              <GroupSection key={group.provider.id} group={group} now={now} history={view.history.readable} />
-            ))}
-            {groups.length === 0 && (
-              <p className="py-6 text-center text-sm text-text-soft-400">No accounts match “{query}”.</p>
-            )}
-          </div>
-          <ConnectProviders providers={view.unconnected} />
+          {view.accountCount === 0 ? (
+            <EmptyState blocked={view.addAccountBlocked} onAdd={() => setAdding(true)} />
+          ) : (
+            <>
+              <div className="flex w-full flex-col gap-5">
+                {groups.map((group) => (
+                  <GroupSection key={group.provider.id} group={group} now={now} history={view.history.readable} />
+                ))}
+                {groups.length === 0 && (
+                  <p className="py-6 text-center text-sm text-text-soft-400">No accounts match “{query}”.</p>
+                )}
+              </div>
+              <ConnectProviders providers={view.unconnected} />
+            </>
+          )}
         </>
       )}
 
@@ -195,14 +205,14 @@ function LoadingGroups() {
   );
 }
 
-function EmptyState({ onAdd }: { onAdd: () => void }) {
+function EmptyState({ blocked, onAdd }: { blocked: string | null; onAdd: () => void }) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-2xl bg-bg-weak-50 px-6 py-12 text-center">
       <h2 className="text-sm font-medium text-text-strong-950">No accounts yet</h2>
       <p className="max-w-sm text-sm text-text-sub-600">
         Sign in to Claude Code, Codex or another supported tool and Quotio finds the login on its next scan.
       </p>
-      <Button variant="inverse" size="sm" onClick={onAdd}>
+      <Button variant="inverse" size="sm" disabled={blocked !== null} title={blocked ?? undefined} onClick={onAdd}>
         <RiAddLine />
         Add account
       </Button>

@@ -22,6 +22,7 @@ const EXIT_POLL: Duration = Duration::from_millis(500);
 const MIN_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 const HEALTHY_RUN: Duration = Duration::from_secs(60);
+const VAULT_KEY_WAIT: Duration = Duration::from_secs(15);
 const VAULT_NAMESPACE: &str = "quotio-desktop";
 const DEFAULT_REFRESH_SECONDS: u64 = 300;
 
@@ -30,6 +31,60 @@ enum Status {
     Starting,
     Ready { base_url: String, token: String },
     Failed(String),
+}
+
+type VaultKey = [u8; 32];
+
+/// What the Secret Service has answered about the vault key so far.
+enum KeyState {
+    /// No answer yet: a locked keyring blocks the lookup behind its unlock prompt.
+    Pending(mpsc::Receiver<Option<VaultKey>>),
+    Ready(VaultKey),
+    Unavailable,
+}
+
+impl KeyState {
+    /// Asks the Secret Service on its own thread and waits up to `VAULT_KEY_WAIT` for the answer.
+    fn fetch() -> Self {
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(vault_key());
+        });
+        let mut state = KeyState::Pending(receiver);
+        state.poll(VAULT_KEY_WAIT);
+        if let KeyState::Pending(_) = state {
+            eprintln!(
+                "quotio-desktop: the Secret Service has not answered yet (locked keyring?); starting without saved accounts"
+            );
+        }
+        state
+    }
+
+    /// Takes the answer if it arrives within `wait`; true when the key just became ready.
+    fn poll(&mut self, wait: Duration) -> bool {
+        let KeyState::Pending(receiver) = self else {
+            return false;
+        };
+        *self = match receiver.recv_timeout(wait) {
+            Ok(Some(key)) => KeyState::Ready(key),
+            Ok(None) | Err(mpsc::RecvTimeoutError::Disconnected) => KeyState::Unavailable,
+            Err(mpsc::RecvTimeoutError::Timeout) => return false,
+        };
+        matches!(self, KeyState::Ready(_))
+    }
+
+    fn key(&self) -> Option<&VaultKey> {
+        match self {
+            KeyState::Ready(key) => Some(key),
+            KeyState::Pending(_) | KeyState::Unavailable => None,
+        }
+    }
+}
+
+enum Exit {
+    Exited(ExitStatus),
+    /// The child was stopped on purpose: the vault key arrived after a keyless launch.
+    VaultKeyReady,
 }
 
 struct Running {
@@ -108,14 +163,15 @@ impl Sidecar {
 
     /// Launches the child, then relaunches it with backoff whenever it exits after
     /// it was ready. A failed first launch is final: retrying a missing or
-    /// incompatible binary cannot help.
+    /// incompatible binary cannot help. A vault key that arrives after a keyless
+    /// launch restarts the child once, without backoff.
     fn supervise(&self, binary: &Path, data_dir: &Path, sender: &watch::Sender<Status>) {
-        let vault_key = vault_key();
+        let mut vault_key = KeyState::fetch();
         let mut was_ready = false;
         let mut backoff = MIN_BACKOFF;
         loop {
             sender.send_replace(Status::Starting);
-            match launch(binary, data_dir, vault_key.as_ref()) {
+            match launch(binary, data_dir, vault_key.key()) {
                 Ok((running, base_url, token)) => {
                     {
                         let mut slot = self.running.lock().unwrap();
@@ -129,10 +185,16 @@ impl Sidecar {
                     was_ready = true;
                     let ready_at = Instant::now();
                     sender.send_replace(Status::Ready { base_url, token });
-                    let Some(status) = self.wait_for_exit() else {
-                        return;
-                    };
-                    eprintln!("quotio-desktop: the Quotio CLI exited ({status}); restarting");
+                    match self.wait_for_exit(&mut vault_key) {
+                        None => return,
+                        Some(Exit::VaultKeyReady) => {
+                            eprintln!("quotio-desktop: the vault key arrived; restarting the Quotio CLI with it");
+                            continue;
+                        }
+                        Some(Exit::Exited(status)) => {
+                            eprintln!("quotio-desktop: the Quotio CLI exited ({status}); restarting");
+                        }
+                    }
                     sender.send_replace(Status::Starting);
                     if ready_at.elapsed() >= HEALTHY_RUN {
                         backoff = MIN_BACKOFF;
@@ -154,16 +216,22 @@ impl Sidecar {
         }
     }
 
-    /// Returns the exit status once the running child exits, or `None` once `stop`
-    /// has taken it.
-    fn wait_for_exit(&self) -> Option<ExitStatus> {
+    /// Returns why the running child is gone, or `None` once `stop` has taken it.
+    /// While the vault key is pending, its arrival stops the child for a relaunch.
+    fn wait_for_exit(&self, vault_key: &mut KeyState) -> Option<Exit> {
         loop {
             std::thread::sleep(EXIT_POLL);
             let mut slot = self.running.lock().unwrap();
+            if vault_key.poll(Duration::ZERO) {
+                let running = slot.take()?;
+                drop(slot);
+                running.shutdown();
+                return Some(Exit::VaultKeyReady);
+            }
             match slot.as_mut()?.child.try_wait() {
                 Ok(Some(status)) => {
                     slot.take();
-                    return Some(status);
+                    return Some(Exit::Exited(status));
                 }
                 Ok(None) => {}
                 Err(error) => {
@@ -257,7 +325,7 @@ fn validate_path(path: &str) -> Result<(), ApiError> {
 fn launch(
     binary: &Path,
     data_dir: &Path,
-    vault_key: Option<&[u8; 32]>,
+    vault_key: Option<&VaultKey>,
 ) -> Result<(Running, String, String), String> {
     if !binary.is_file() {
         return Err(format!("Quotio CLI not found at {}", binary.display()));
@@ -275,10 +343,18 @@ fn launch(
     command
         .args(["serve", "--manage", "--parent-pipe", "--listen", "127.0.0.1:0"])
         .arg("--config")
-        .arg(&config)
-        .args(["--account-vault-namespace", VAULT_NAMESPACE])
-        .arg("--account-data-dir")
-        .arg(&accounts)
+        .arg(&config);
+    // Without its key the Linux vault can only report itself locked, which fails every
+    // request, so serve logins found on this computer instead.
+    if cfg!(target_os = "linux") && vault_key.is_none() {
+        command.arg("--no-saved-accounts");
+    } else {
+        command
+            .args(["--account-vault-namespace", VAULT_NAMESPACE])
+            .arg("--account-data-dir")
+            .arg(&accounts);
+    }
+    command
         .env_remove("QUOTIO_SERVER_TOKEN")
         .env_remove("QUOTIO_VAULT_KEY_FILE")
         .env_remove("QUOTIO_VAULT_KEY_FD")
@@ -371,11 +447,11 @@ fn random_token() -> String {
 }
 
 /// Loads the Linux vault key from the Secret Service, creating it on first launch.
-/// Without a key the CLI keeps its vault locked and reports `credential_storage`,
-/// while quota for native logins keeps working.
+/// A locked keyring blocks this behind its unlock prompt, so the caller runs it on
+/// its own thread.
 #[cfg(target_os = "linux")]
-fn vault_key() -> Option<[u8; 32]> {
-    let load = || -> Result<[u8; 32], String> {
+fn vault_key() -> Option<VaultKey> {
+    let load = || -> Result<VaultKey, String> {
         let entry = keyring::Entry::new("dev.quotio.desktop", "vault-key")
             .map_err(|error| error.to_string())?;
         match entry.get_secret() {
@@ -383,7 +459,7 @@ fn vault_key() -> Option<[u8; 32]> {
                 .try_into()
                 .map_err(|_| "the stored vault key has the wrong length".into()),
             Err(keyring::Error::NoEntry) => {
-                let mut key = [0u8; 32];
+                let mut key: VaultKey = [0; 32];
                 getrandom::fill(&mut key).expect("system randomness");
                 entry.set_secret(&key).map_err(|error| error.to_string())?;
                 Ok(key)
@@ -401,7 +477,7 @@ fn vault_key() -> Option<[u8; 32]> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn vault_key() -> Option<[u8; 32]> {
+fn vault_key() -> Option<VaultKey> {
     None
 }
 
@@ -411,7 +487,7 @@ fn vault_key() -> Option<[u8; 32]> {
 #[cfg(target_os = "linux")]
 fn pass_vault_key(
     command: &mut Command,
-    vault_key: Option<&[u8; 32]>,
+    vault_key: Option<&VaultKey>,
 ) -> std::io::Result<Option<PipeReader>> {
     use std::os::{fd::AsRawFd, unix::process::CommandExt};
     let Some(key) = vault_key else {
@@ -449,7 +525,7 @@ fn pass_vault_key(
 #[cfg(not(target_os = "linux"))]
 fn pass_vault_key(
     _command: &mut Command,
-    _vault_key: Option<&[u8; 32]>,
+    _vault_key: Option<&VaultKey>,
 ) -> std::io::Result<Option<PipeReader>> {
     Ok(None)
 }

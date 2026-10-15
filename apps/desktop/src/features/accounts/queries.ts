@@ -8,17 +8,28 @@ const SNAPSHOT_POLL_MS = 15_000;
 const OPERATION_POLL_MS = 750;
 const OPERATION_DEADLINE_MS = 90_000;
 
-const keys = { snapshot: ["snapshot"], providers: ["providers"], discovery: ["discovery"] } as const;
+// The status key is shared with the Settings pages so one invalidation reaches both.
+const keys = { snapshot: ["snapshot"], providers: ["providers"], status: ["status"], discovery: ["discovery"] } as const;
 
 export function useAccountsView() {
   const snapshot = useQuery({ queryKey: keys.snapshot, queryFn: api.snapshot, refetchInterval: SNAPSHOT_POLL_MS });
   const providers = useQuery({ queryKey: keys.providers, queryFn: api.providers, staleTime: Infinity });
+  const status = useQuery({ queryKey: keys.status, queryFn: api.status, refetchInterval: SNAPSHOT_POLL_MS });
   const view = useMemo(
-    () => (snapshot.data && providers.data ? projectAccounts(snapshot.data, providers.data) : undefined),
-    [snapshot.data, providers.data],
+    () =>
+      snapshot.data && providers.data && status.data ? projectAccounts(snapshot.data, providers.data, status.data) : undefined,
+    [snapshot.data, providers.data, status.data],
   );
-  const retry = useCallback(() => Promise.all([snapshot.refetch(), providers.refetch()]), [snapshot.refetch, providers.refetch]);
-  return { view, error: snapshot.error ?? providers.error, isPending: snapshot.isPending || providers.isPending, retry };
+  const retry = useCallback(
+    () => Promise.all([snapshot.refetch(), providers.refetch(), status.refetch()]),
+    [snapshot.refetch, providers.refetch, status.refetch],
+  );
+  return {
+    view,
+    error: snapshot.error ?? providers.error ?? status.error,
+    isPending: snapshot.isPending || providers.isPending || status.isPending,
+    retry,
+  };
 }
 
 /** Starts a refresh, waits for its operation to finish, then re-reads the snapshot. */
@@ -26,7 +37,11 @@ export function useRefresh() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: async (request: RefreshRequest) => settle(await api.refresh(request)),
-    onSettled: () => client.invalidateQueries({ queryKey: keys.snapshot }),
+    onSettled: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: keys.snapshot }),
+        client.invalidateQueries({ queryKey: keys.status }),
+      ]),
   });
 }
 
