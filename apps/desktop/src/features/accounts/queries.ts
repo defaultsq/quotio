@@ -1,5 +1,6 @@
+import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Operation, type RefreshRequest } from "@/lib/api/client";
+import { api, type Operation, type ProviderId, type RefreshRequest } from "@/lib/api/client";
 import { projectAccounts } from "./model";
 
 // Snapshot reads never fetch provider quota, so polling is cheap; the host schedules refreshes.
@@ -12,13 +13,12 @@ const keys = { snapshot: ["snapshot"], providers: ["providers"], discovery: ["di
 export function useAccountsView() {
   const snapshot = useQuery({ queryKey: keys.snapshot, queryFn: api.snapshot, refetchInterval: SNAPSHOT_POLL_MS });
   const providers = useQuery({ queryKey: keys.providers, queryFn: api.providers, staleTime: Infinity });
-  const view = snapshot.data && providers.data ? projectAccounts(snapshot.data, providers.data) : undefined;
-  return {
-    view,
-    error: snapshot.error ?? providers.error,
-    isPending: snapshot.isPending || providers.isPending,
-    retry: () => Promise.all([snapshot.refetch(), providers.refetch()]),
-  };
+  const view = useMemo(
+    () => (snapshot.data && providers.data ? projectAccounts(snapshot.data, providers.data) : undefined),
+    [snapshot.data, providers.data],
+  );
+  const retry = useCallback(() => Promise.all([snapshot.refetch(), providers.refetch()]), [snapshot.refetch, providers.refetch]);
+  return { view, error: snapshot.error ?? providers.error, isPending: snapshot.isPending || providers.isPending, retry };
 }
 
 /** Starts a refresh, waits for its operation to finish, then re-reads the snapshot. */
@@ -34,11 +34,18 @@ export function useDiscovery() {
   return useQuery({ queryKey: keys.discovery, queryFn: api.discovery });
 }
 
-/** Scans every provider for logins already on this computer, then re-reads what the scan found. */
+type ScanRequest = {
+  /** Omitted: every tracked provider. */
+  providers?: ProviderId[];
+  /** Registers logins the user removed earlier too; only for an explicit "Add". */
+  restoreRemoved?: boolean;
+};
+
+/** Scans providers for logins already on this computer, registers them, then re-reads what the scan found. */
 export function useScan() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: async () => settle(await api.discover()),
+    mutationFn: async (request: ScanRequest = {}) => settle(await api.discover(request.providers, request.restoreRemoved)),
     onSettled: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: keys.discovery }),

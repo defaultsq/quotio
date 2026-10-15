@@ -7,6 +7,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { refreshLaunchAtLogin } from "@/features/settings/launch-at-login";
 import { restoreSharing } from "@/features/sharing/queries";
 import { ApiError } from "@/lib/api/client";
+import { Popover } from "@/features/tray/popover";
+import { isPopover } from "@/lib/desktop";
 import { loadPreferences } from "@/lib/preferences";
 import { startTheme } from "@/lib/theme";
 import { App } from "./app/app";
@@ -23,14 +25,18 @@ const queryClient = new QueryClient({
 // Preferences load before the first render so the theme and hidden names never flash.
 await loadPreferences();
 startTheme();
-void refreshLaunchAtLogin();
-void restoreSharing(queryClient);
+// The tray popover is a second window on the same entry; app-wide startup work runs in the main window only.
+const popover = isPopover();
+if (!popover) {
+  void refreshLaunchAtLogin();
+  void restoreSharing(queryClient);
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <App />
+        {popover ? <Popover /> : <App />}
       </TooltipProvider>
     </QueryClientProvider>
   </StrictMode>,

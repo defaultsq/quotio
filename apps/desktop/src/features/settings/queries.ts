@@ -12,7 +12,7 @@ export function useSettings() {
 }
 
 // Only the fields this app edits; the host also accepts null to reset a field, which the UI never sends.
-type Change = Partial<Pick<Settings, "refresh_interval" | "automatically_discover_logins">>;
+type Change = Partial<Pick<Settings, "refresh_interval" | "automatically_discover_logins" | "quota_history_enabled">>;
 
 /**
  * Applies one change optimistically. The host rejects a stale `revision` with 409; one user

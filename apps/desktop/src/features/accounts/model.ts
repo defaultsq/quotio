@@ -31,9 +31,13 @@ export type MetricView = {
   remainingPercent: number | null;
   value: string;
   tone: Tone;
+  /** The host reports the limit as used up, not merely low. */
+  exhausted: boolean;
   resetsAt: Date | null;
   resetsOnDay: boolean;
   resetDescription: string | null;
+  /** Length of one quota period, when the host knows it; pace needs it. */
+  windowSeconds: number | null;
 };
 
 export type AttentionItem = {
@@ -56,6 +60,8 @@ export type AccountView = {
   /** Why quota is missing when there are no metrics to show. */
   emptyReason: string | null;
   attention: AttentionItem | null;
+  /** The provider rejected the saved login; only signing in again fixes it. */
+  signInExpired: boolean;
 };
 
 export type ProviderGroup = { provider: ProviderView; accounts: AccountView[] };
@@ -66,6 +72,8 @@ export type AccountsView = {
   accountCount: number;
   lastUpdated: Date | null;
   unconnected: ProviderView[];
+  /** Whether this host keeps quota history, and why not when it can't. */
+  history: { readable: boolean; writable: boolean; reason: string | null };
 };
 
 export function projectAccounts(snapshot: Snapshot, providers: Provider[]): AccountsView {
@@ -102,6 +110,11 @@ export function projectAccounts(snapshot: Snapshot, providers: Provider[]): Acco
     accountCount: snapshot.accounts.length,
     lastUpdated: fetched.length > 0 ? new Date(Math.max(...fetched)) : null,
     unconnected: providers.filter((provider) => !accountsByProvider.has(provider.id)).map(providerView),
+    history: {
+      readable: snapshot.host.capabilities.quota_history?.available ?? false,
+      writable: snapshot.host.capabilities.quota_history_write?.available ?? false,
+      reason: snapshot.host.capabilities.quota_history_write?.reason ?? snapshot.host.capabilities.quota_history?.reason ?? null,
+    },
   };
 }
 
@@ -147,6 +160,7 @@ function accountView(account: Account, provider: ProviderView, usage: Usage | nu
     metrics,
     emptyReason: metrics.length > 0 ? null : emptyReason(account, usage),
     attention: accountAttention(account, provider, usage),
+    signInExpired: account.state === "needs_login" || accountIssue(account, usage)?.code === "authentication",
   };
 }
 
@@ -170,6 +184,8 @@ function metricView(metric: Metric): MetricView {
     resetsAt: metric.resets_at ? new Date(metric.resets_at) : null,
     resetsOnDay: metric.reset_precision === "day",
     resetDescription: metric.reset_description,
+    windowSeconds: metric.window_seconds ?? null,
+    exhausted: metric.quota.state === "exhausted",
   };
   const quota = metric.quota;
   switch (quota.state) {
@@ -209,7 +225,7 @@ function formatAmount(value: number): string {
 const STATES_NEEDING_ACTION: ReadonlySet<ConnectionState> = new Set(["needs_login", "needs_authorization", "unavailable"]);
 
 function accountAttention(account: Account, provider: ProviderView, usage: Usage | null): AttentionItem | null {
-  const issue = usage?.issue ?? account.sources.find((source) => source.issue)?.issue ?? null;
+  const issue = accountIssue(account, usage);
   if (!issue && !STATES_NEEDING_ACTION.has(account.state)) return null;
   return {
     key: `account:${account.id}`,
@@ -221,6 +237,10 @@ function accountAttention(account: Account, provider: ProviderView, usage: Usage
         ? { providers: [provider.refreshId], account_id: account.id, force: true }
         : null,
   };
+}
+
+function accountIssue(account: Account, usage: Usage | null): Issue | null {
+  return usage?.issue ?? account.sources.find((source) => source.issue)?.issue ?? null;
 }
 
 function providerAttention(provider: ProviderView, issue: Issue): AttentionItem {

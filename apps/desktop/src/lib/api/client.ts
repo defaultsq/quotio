@@ -22,6 +22,13 @@ export type SharingEndpoint = Pick<Schemas["CompanionSharing"], "enabled" | "lis
 // The OpenAPI document predates per-mode listeners; the host also returns `endpoints` and, on GET, `addresses`.
 export type Sharing = SharingEndpoint & { endpoints: SharingEndpoint[]; addresses?: SharingAddress[] };
 export type Client = Schemas["ClientInfo"];
+export type HistoryCatalog = Schemas["QuotaHistoryCatalog"];
+export type HistoryChart = Schemas["QuotaHistoryChart"];
+export type HistoryRange = HistoryChart["range"];
+export type HistoryBin = Schemas["QuotaHistoryBin"];
+export type HistoryEvent = Schemas["QuotaHistoryEvent"];
+export type SourceKind = Schemas["SourceDiscoveryInput"]["kind"];
+export type SourceInspection = Schemas["SourceDiscoveryResult"];
 export type ClientCreated = Schemas["ClientCreated"];
 
 /** Why a request failed, as the UI needs to tell the cases apart. */
@@ -86,7 +93,8 @@ function parseSnapshot(body: unknown): Snapshot {
 
 function parseProviders(body: unknown): Provider[] {
   if (!isRecord(body) || body.schema_version !== 2 || !Array.isArray(body.providers)) invalid("provider list");
-  return body.providers as Provider[];
+  // `mock` is the CLI's offline fixture, not a provider a user can connect.
+  return (body.providers as Provider[]).filter((provider) => provider.id !== "mock");
 }
 
 function parseOperation(body: unknown): Operation {
@@ -115,7 +123,6 @@ export const api = {
   updateSettings: async (patch: SettingsPatch) => parseSettings(await request("PATCH", "/v2/settings", patch)),
   discovery: async () =>
     parseVersioned<Discovery>("discovery status", await request("GET", "/v2/discovery"), (body) => Array.isArray(body.scans)),
-  discover: async () => parseOperation(await request("POST", "/v2/discovery", {})),
   sharing: async () =>
     parseVersioned<Sharing>("sharing status", await request("GET", "/v2/sharing"), (body) => Array.isArray(body.endpoints)),
   updateSharing: async (body: SharingUpdate) =>
@@ -132,4 +139,29 @@ export const api = {
   revokeClient: async (id: string) => {
     await request("DELETE", `/v2/clients/${id}`);
   },
+  historyCatalog: async (accountId: string) =>
+    parseVersioned<HistoryCatalog>(
+      "history catalog",
+      await request("GET", `/v2/accounts/${accountId}/quota-history`),
+      (body) => Array.isArray(body.metrics),
+    ),
+  historyChart: async (accountId: string, metricId: string, range: HistoryRange) =>
+    parseVersioned<HistoryChart>(
+      "history chart",
+      await request("GET", `/v2/accounts/${accountId}/quota-history/${metricId}/${range}`),
+      (body) => Array.isArray(body.bins) && Array.isArray(body.events),
+    ),
+  clearHistory: async () => {
+    await request("DELETE", "/v2/quota-history");
+  },
+  /** Lists logins of one kind on this computer without registering them. */
+  inspectSources: async (provider: ProviderId, kind: SourceKind) =>
+    parseVersioned<SourceInspection>(
+      "login inspection",
+      await request("POST", "/v2/sources/discover", { provider, kind, inspect: true }),
+      (body) => Array.isArray(body.candidates),
+    ),
+  /** Scans providers and registers the logins found; `restore_removed` brings back ones the user removed. */
+  discover: async (providers: ProviderId[] = [], restoreRemoved = false) =>
+    parseOperation(await request("POST", "/v2/discovery", { providers, restore_removed: restoreRemoved })),
 };

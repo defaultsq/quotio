@@ -1,5 +1,6 @@
-import { RiCheckboxCircleFill, RiErrorWarningLine } from "@remixicon/react";
+import { RiCheckboxCircleFill, RiErrorWarningLine, RiLineChartLine } from "@remixicon/react";
 import { SensitiveText } from "@/components/sensitive-text";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatReset } from "./format";
@@ -12,7 +13,7 @@ const toneFill: Record<Tone, string> = {
   neutral: "bg-text-soft-400",
 };
 
-export function AccountRow({ view, now }: { view: AccountView; now: number }) {
+export function AccountRow({ view, now, onHistory }: { view: AccountView; now: number; onHistory: (() => void) | null }) {
   const { account, attention } = view;
   return (
     <div className="flex items-center gap-6 border-b border-stroke-soft-200 px-4 py-3.5 last:border-b-0">
@@ -50,6 +51,23 @@ export function AccountRow({ view, now }: { view: AccountView; now: number }) {
         </div>
       ) : (
         <span className="flex-1 text-xs text-text-soft-400">{view.emptyReason}</span>
+      )}
+
+      {onHistory && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Quota history for ${account.display_name}`}
+              onClick={onHistory}
+              className="shrink-0 text-text-soft-400 hover:text-text-strong-950"
+            >
+              <RiLineChartLine className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Quota history</TooltipContent>
+        </Tooltip>
       )}
     </div>
   );

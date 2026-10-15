@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import {
   RiGroupLine,
   RiInformationLine,
-  RiLayoutTopLine,
+  RiLayoutBottomLine,
   RiNotification3Line,
   RiServerLine,
   RiSettings3Line,
@@ -17,7 +17,7 @@ export const pages = {
   iphone: { label: "iPhone Sharing", icon: RiSmartphoneLine },
   cliproxy: { label: "CLIProxyAPI", icon: RiServerLine },
   general: { label: "General", icon: RiSettings3Line },
-  menubar: { label: "Menu Bar", icon: RiLayoutTopLine },
+  tray: { label: "Tray", icon: RiLayoutBottomLine },
   notifications: { label: "Notifications", icon: RiNotification3Line },
   privacy: { label: "Privacy", icon: RiShieldKeyholeLine },
   about: { label: "About & Updates", icon: RiInformationLine },
@@ -27,7 +27,7 @@ export type PageId = keyof typeof pages;
 
 const sections: { title?: string; items: PageId[]; footer?: boolean }[] = [
   { items: ["accounts", "iphone", "cliproxy"] },
-  { title: "Application", items: ["general", "menubar", "notifications", "privacy"] },
+  { title: "Application", items: ["general", "tray", "notifications", "privacy"] },
   { items: ["about"], footer: true },
 ];
 

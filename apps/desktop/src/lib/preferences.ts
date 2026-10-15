@@ -1,6 +1,8 @@
 // App-side preferences: everything the host does not own. One versioned record in one store file,
 // parsed field by field at load so a damaged or older file falls back to defaults, not to a crash.
 import { useSyncExternalStore } from "react";
+import { emit, listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { load, type Store } from "@tauri-apps/plugin-store";
 
 export const themes = ["system", "light", "dark"] as const;
@@ -10,6 +12,9 @@ export const quotaThresholds = [10, 20, 30, 50] as const;
 export type QuotaThreshold = (typeof quotaThresholds)[number];
 
 export type DirectSharingMode = "local_network" | "tailscale";
+
+export const trayDensities = ["comfortable", "compact"] as const;
+export type TrayDensity = (typeof trayDensities)[number];
 
 export type Preferences = {
   theme: Theme;
@@ -29,9 +34,19 @@ export type Preferences = {
     port: number;
     modes: Record<DirectSharingMode, { enabled: boolean; address: string | null }>;
   };
+  tray: {
+    density: TrayDensity;
+    /** Provider IDs left out of the popover; a deny list so newly connected providers show up. */
+    hiddenProviders: string[];
+    percentInTooltip: boolean;
+  };
+  /** False until the welcome guide is finished or dismissed. */
+  onboarded: boolean;
+  /** Alert keys already notified (see features/alerts/model.ts), so a restart does not repeat them. */
+  notifiedAlerts: string[];
 };
 
-const VERSION = 1;
+const VERSION = 2;
 const FILE = "preferences.json";
 const KEY = "preferences";
 
@@ -45,7 +60,13 @@ export const defaultPreferences: Preferences = {
     port: 6768,
     modes: { local_network: { enabled: false, address: null }, tailscale: { enabled: false, address: null } },
   },
+  tray: { density: "comfortable", hiddenProviders: [], percentInTooltip: true },
+  onboarded: false,
+  notifiedAlerts: [],
 };
+
+// The main window and the tray popover each hold a copy; a save broadcasts the new record to the other.
+const CHANGED_EVENT = "preferences-changed";
 
 let current = defaultPreferences;
 let store: Store | null = null;
@@ -56,6 +77,11 @@ export async function loadPreferences(): Promise<Preferences> {
   try {
     store = await load(FILE, { autoSave: false, defaults: {} });
     current = parsePreferences(await store.get(KEY));
+    await listen<{ origin: string; record: unknown }>(CHANGED_EVENT, ({ payload }) => {
+      if (payload.origin === getCurrentWindow().label) return;
+      current = parsePreferences(payload.record);
+      listeners.forEach((listener) => listener());
+    });
   } catch (error) {
     console.error("Preferences could not be loaded", error);
   }
@@ -80,15 +106,20 @@ export function updatePreferences(update: (preferences: Preferences) => Preferen
   listeners.forEach((listener) => listener());
   const saved = store;
   if (!saved) return;
+  const record = { version: VERSION, ...current };
   saved
-    .set(KEY, { version: VERSION, ...current })
+    .set(KEY, record)
     .then(() => saved.save())
+    .then(() => emit(CHANGED_EVENT, { origin: getCurrentWindow().label, record }))
     .catch((error) => console.error("Preferences could not be saved", error));
 }
 
 function parsePreferences(raw: unknown): Preferences {
-  if (!isRecord(raw) || raw.version !== VERSION) return defaultPreferences;
+  if (!isRecord(raw) || (raw.version !== 1 && raw.version !== VERSION)) return defaultPreferences;
   const fallback = defaultPreferences;
+  // Version 1 predates the welcome guide; anyone upgrading from it has already set Quotio up.
+  const onboarded = raw.version === 1 ? true : boolean(raw.onboarded, fallback.onboarded);
+  const tray = isRecord(raw.tray) ? raw.tray : {};
   const notifications = isRecord(raw.notifications) ? raw.notifications : {};
   const sharing = isRecord(raw.sharing) ? raw.sharing : {};
   const modes = isRecord(sharing.modes) ? sharing.modes : {};
@@ -116,7 +147,18 @@ function parsePreferences(raw: unknown): Preferences {
       port: isPort(port) ? port : fallback.sharing.port,
       modes: { local_network: mode("local_network"), tailscale: mode("tailscale") },
     },
+    tray: {
+      density: oneOf(trayDensities, tray.density, fallback.tray.density),
+      hiddenProviders: strings(tray.hiddenProviders),
+      percentInTooltip: boolean(tray.percentInTooltip, fallback.tray.percentInTooltip),
+    },
+    onboarded,
+    notifiedAlerts: strings(raw.notifiedAlerts),
   };
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 export function isPort(value: unknown): value is number {

@@ -20,6 +20,7 @@ export function GeneralPage() {
       <StartupSection />
       <AppearanceSection />
       <RefreshSection />
+      <GuideSection />
     </>
   );
 }
@@ -94,6 +95,18 @@ function AppearanceSection() {
   );
 }
 
+function GuideSection() {
+  return (
+    <SettingsSection title="Getting started" description="The guide that runs the first time Quotio opens.">
+      <SettingsRow label="Welcome guide" help="Walk through connecting providers again.">
+        <Button variant="raised" size="sm" onClick={() => updatePreferences((preferences) => ({ ...preferences, onboarded: false }))}>
+          Show guide
+        </Button>
+      </SettingsRow>
+    </SettingsSection>
+  );
+}
+
 function RefreshSection() {
   const settings = useSettings();
   const update = useUpdateSettings();
@@ -160,7 +173,7 @@ function RefreshSection() {
         label="Scan now"
         help={scan.error ? `The scan failed. ${scan.error.message}` : scanSummary(discovery.data, now)}
       >
-        <Button variant="raised" size="sm" disabled={scan.isPending} onClick={() => scan.mutate()}>
+        <Button variant="raised" size="sm" disabled={scan.isPending} onClick={() => scan.mutate({})}>
           <RiRefreshLine className={cn("size-[15px]", scan.isPending && "animate-spin")} />
           {scan.isPending ? "Scanning…" : "Scan all providers"}
         </Button>

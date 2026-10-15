@@ -28,9 +28,10 @@ const modeIcon: Record<DirectSharingMode, typeof RiWifiLine> = {
   tailscale: RiShieldKeyholeLine,
 };
 
-export function SharingPage() {
+/** `pairOnOpen` opens the pairing dialog as soon as sharing status loads (the tray's "Pair iPhone…"). */
+export function SharingPage({ pairOnOpen = false }: { pairOnOpen?: boolean }) {
   const sharing = useSharing();
-  const [pairing, setPairing] = useState(false);
+  const [pairing, setPairing] = useState(pairOnOpen);
   return (
     <>
       <SettingsHeader

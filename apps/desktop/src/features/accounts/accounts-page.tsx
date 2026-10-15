@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api/client";
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
+import { useOpenHistory } from "@/features/history/open-history";
 import { AccountRow } from "./account-row";
 import { AttentionPanel } from "./attention-panel";
 import { formatUpdated } from "./format";
@@ -65,7 +66,7 @@ export function AccountsPage() {
           <AttentionPanel items={view.attention} />
           <div className="flex w-full flex-col gap-5">
             {groups.map((group) => (
-              <GroupSection key={group.provider.id} group={group} now={now} />
+              <GroupSection key={group.provider.id} group={group} now={now} history={view.history.readable} />
             ))}
             {groups.length === 0 && (
               <p className="py-6 text-center text-sm text-text-soft-400">No accounts match “{query}”.</p>
@@ -80,8 +81,9 @@ export function AccountsPage() {
   );
 }
 
-function GroupSection({ group, now }: { group: ProviderGroup; now: number }) {
+function GroupSection({ group, now, history }: { group: ProviderGroup; now: number; history: boolean }) {
   const refresh = useRefresh();
+  const openHistory = useOpenHistory();
   const refreshId = group.provider.refreshId;
   return (
     <section className="flex flex-col gap-2">
@@ -107,7 +109,12 @@ function GroupSection({ group, now }: { group: ProviderGroup; now: number }) {
       </div>
       <div className="flex flex-col overflow-hidden rounded-2xl border border-stroke-soft-200">
         {group.accounts.map((view) => (
-          <AccountRow key={view.account.id} view={view} now={now} />
+          <AccountRow
+            key={view.account.id}
+            view={view}
+            now={now}
+            onHistory={history && openHistory ? () => openHistory(view.account.id) : null}
+          />
         ))}
       </div>
     </section>
