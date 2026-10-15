@@ -1362,6 +1362,56 @@ fn native_login_exists(provider: Provider) -> bool {
         .native_candidates(provider, None)
         .is_ok_and(|candidates| !candidates.is_empty())
 }
+/// Collection without a vault. A vault host reads only the sources a native scan
+/// registered plus environment credentials, so this keeps a provider's implicit login
+/// only where such a scan would find one. Without that, every tracked provider runs
+/// and reports a login that was never there as a failure.
+pub(crate) fn keyless_adapters(providers: Vec<Provider>) -> Vec<Arc<dyn ProviderAdapter>> {
+    let all = providers.iter().map(|p| p.id().to_owned()).collect();
+    providers
+        .into_iter()
+        .filter(|&provider| {
+            provider == Provider::Mock
+                || !native_default_suppressed(provider, &all)
+                || native_source_found(provider)
+        })
+        .map(Provider::adapter)
+        .collect()
+}
+fn native_source_found(provider: Provider) -> bool {
+    let mut registry = super::discovery::Registry::default();
+    crate::providers::capabilities::capability(provider)
+        .source_references
+        .iter()
+        .filter(|source| {
+            source.origin == "borrowed_native"
+                && source.kind != "quotio_custom_provider"
+                && source.platforms.contains(&std::env::consts::OS)
+        })
+        .any(|source| {
+            registry
+                .inspect(super::discovery::Request {
+                    provider,
+                    kind: source.kind.into(),
+                    location: None,
+                    domain: None,
+                    inspect: true,
+                    config_dir: None,
+                })
+                .is_ok_and(|inspected| {
+                    inspected["candidates"]
+                        .as_array()
+                        .is_some_and(|candidates| {
+                            candidates.iter().any(|candidate| {
+                                matches!(
+                                    candidate["status"].as_str(),
+                                    Some("available" | "permission_required")
+                                )
+                            })
+                        })
+                })
+        })
+}
 async fn local_sources(requested: &[Provider], timeout: std::time::Duration) -> Vec<Provider> {
     let mut sources: Vec<_> = requested
         .iter()

@@ -905,7 +905,9 @@ async fn collect_usage(
     let adapters = if disabled_proxy_account || (account.is_some() && !borrowed.is_empty()) {
         Ok(borrowed)
     } else {
-        let managed = if state.no_saved_accounts {
+        let managed = if state.no_saved_accounts && account.is_none() {
+            Ok(crate::accounts::service::keyless_adapters(selected.clone()))
+        } else if state.no_saved_accounts {
             crate::accounts::service::adapters(selected.clone(), false, timeout, account.as_deref())
                 .await
         } else if let Some(vault) = state.vault.clone() {
