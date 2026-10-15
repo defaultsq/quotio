@@ -287,7 +287,7 @@ async fn http_snapshots_security_and_process_shutdown() {
     child.kill().await.unwrap();
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 async fn parent_pipe_bootstrap_authentication_and_eof_shutdown() {
     use tokio::io::AsyncWriteExt;
@@ -365,7 +365,7 @@ async fn parent_pipe_bootstrap_authentication_and_eof_shutdown() {
     assert!(!String::from_utf8_lossy(&output.stderr).contains(token));
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 async fn parent_pipe_rejects_ambiguous_token_without_bootstrap() {
     let config = Config::new("parent-conflict");

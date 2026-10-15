@@ -93,7 +93,7 @@ jobs:
           persist-credentials: false
       - name: Check all Windows targets
         run: cargo check --locked --all-targets --all-features
-      - name: Test DPAPI, host contract, device grants and listener isolation
+      - name: Test DPAPI, host contract, device grants, listener isolation and parent pipe
         run: |
           cargo test --locked windows_vault
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -104,6 +104,8 @@ jobs:
           cargo test --locked --test contract --test devices
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked --test server_management
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --test server parent_pipe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build native executable and smoke test
         run: |
