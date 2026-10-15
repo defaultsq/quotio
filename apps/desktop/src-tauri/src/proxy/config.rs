@@ -3,9 +3,13 @@
 //! user's own edits survive. CLIProxyAPI replaces a plaintext `secret-key` with its bcrypt
 //! hash at load, so the plaintext management key lives in its own file and goes back into
 //! the config before every start.
-use std::{fs, io, path::Path};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 pub const FILE: &str = "config.yaml";
+const TRIAL_FILE: &str = "trial.yaml";
 const MANAGEMENT_KEY_FILE: &str = "management-key";
 
 /// Creates the config and management key if missing, points the config at `port`, and
@@ -18,10 +22,21 @@ pub fn prepare(root: &Path, auth_dir: &Path, port: u16) -> io::Result<String> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => template(auth_dir),
         Err(error) => return Err(error),
     };
-    let text = set_value(&text, "port", &port.to_string())
-        .and_then(|text| set_value(&text, "secret-key", &format!("\"{management_key}\"")))?;
-    fs::write(&path, text)?;
+    fs::write(&path, set_port_and_key(&text, port, &management_key)?)?;
     Ok(management_key)
+}
+
+/// A throwaway config for a trial run on `port` with its own management key, so the trial
+/// never touches the user's config. Returns its path and the plaintext key.
+pub fn trial(root: &Path, auth_dir: &Path, port: u16) -> io::Result<(PathBuf, String)> {
+    let management_key = random_hex();
+    let path = root.join(TRIAL_FILE);
+    write_private(&path, &set_port_and_key(&template(auth_dir), port, &management_key)?)?;
+    Ok((path, management_key))
+}
+
+fn set_port_and_key(text: &str, port: u16, management_key: &str) -> io::Result<String> {
+    set_value(text, "port", &port.to_string()).and_then(|text| set_value(&text, "secret-key", &format!("\"{management_key}\"")))
 }
 
 /// The first entry under `api-keys:`, the key AI tools send to the proxy.

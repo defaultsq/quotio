@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getPreferences, updatePreferences } from "@/lib/preferences";
-import type { ProxyRelease, ProxyStatus } from "./model";
+import { isLive, type ProxyRelease, type ProxyStatus } from "./model";
 
 const keys = { status: ["proxy"], releases: ["proxy-releases"] } as const;
 
@@ -74,7 +74,7 @@ export function useSetProxyPort() {
     mutationFn: async (port: number) => {
       updatePreferences((preferences) => ({ ...preferences, proxy: { ...preferences.proxy, port } }));
       const status = await call<ProxyStatus>("proxy_status");
-      if (status.state.kind === "running" || status.state.kind === "starting") await call("proxy_restart", { port });
+      if (isLive(status.state)) await call("proxy_restart", { port });
     },
     onSettled: () => client.invalidateQueries({ queryKey: keys.status }),
   });

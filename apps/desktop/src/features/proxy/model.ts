@@ -2,14 +2,21 @@
 
 export type ProxyState =
   | { kind: "not_installed" }
-  | { kind: "installing"; version: string; progress: number }
   | { kind: "stopped" }
-  | { kind: "starting"; port: number }
-  | { kind: "running"; port: number; pid: number }
+  | { kind: "starting"; port: number; restarts: number }
+  | { kind: "running"; port: number; pid: number; restarts: number; missed_checks: number }
+  | { kind: "restarting"; port: number; attempt: number; reason: string }
+  | { kind: "crashed"; reason: string }
   | { kind: "failed"; reason: string };
+
+/** An install that runs beside the server: the download, then the trial run on a spare port. */
+export type ProxyJob =
+  | { kind: "downloading"; version: string; progress: number }
+  | { kind: "testing"; version: string; port: number };
 
 export type ProxyStatus = {
   state: ProxyState;
+  job: ProxyJob | null;
   active: string | null;
   /** Newest first. */
   installed: string[];
@@ -18,10 +25,16 @@ export type ProxyStatus = {
 
 export type ProxyRelease = { version: string; published_at: string | null; notes: string | null };
 
+/** MAX_RESTARTS and MISSED_CHECKS_LIMIT in proxy.rs. */
+const MAX_RESTARTS = 3;
+const MISSED_CHECKS_LIMIT = 3;
+
 export type ServerTone = "running" | "busy" | "stopped" | "failed";
 
+export type JobView = { title: string; detail: string; percent: number | null };
+
 export type ServerView =
-  | { kind: "not_installed"; installing: { version: string; percent: number } | null }
+  | { kind: "not_installed"; job: JobView | null }
   | {
       kind: "installed";
       tone: ServerTone;
@@ -33,41 +46,63 @@ export type ServerView =
       canStop: boolean;
     };
 
+export function projectJob(job: ProxyJob): JobView {
+  switch (job.kind) {
+    case "downloading": {
+      const percent = Math.round(job.progress * 100);
+      return {
+        title: `Downloading v${job.version}… ${percent}%`,
+        detail: "Quotio checks the download against GitHub’s checksum before using it.",
+        percent,
+      };
+    }
+    case "testing":
+      return {
+        title: `Trying v${job.version}…`,
+        detail: `Quotio runs it on port ${job.port} to check that it starts before switching to it.`,
+        percent: null,
+      };
+  }
+}
+
 export function projectServer(status: ProxyStatus): ServerView {
   const { state, active } = status;
-  if (!active) {
-    return {
-      kind: "not_installed",
-      installing: state.kind === "installing" ? { version: state.version, percent: Math.round(state.progress * 100) } : null,
-    };
-  }
+  if (!active) return { kind: "not_installed", job: status.job ? projectJob(status.job) : null };
   const version = `v${active}`;
   const base = { kind: "installed" as const, endpoint: null, canStart: false, canStop: false };
   switch (state.kind) {
-    case "running":
-      return {
-        ...base,
-        tone: "running",
-        title: "Running",
-        detail: `${version} · port ${state.port}`,
-        endpoint: { url: endpointUrl(state.port), port: state.port },
-        canStop: true,
-      };
+    case "running": {
+      const running = { ...base, endpoint: { url: endpointUrl(state.port), port: state.port }, canStop: true };
+      if (state.missed_checks > 0) {
+        return {
+          ...running,
+          tone: "busy",
+          title: "Not responding",
+          detail: `Missed ${state.missed_checks} of ${MISSED_CHECKS_LIMIT} health checks in a row. Quotio restarts it after the last one.`,
+        };
+      }
+      const restarted = state.restarts > 0 ? " · restarted automatically" : "";
+      return { ...running, tone: "running", title: "Running", detail: `${version} · port ${state.port}${restarted}` };
+    }
     case "starting":
-      return { ...base, tone: "busy", title: "Starting…", detail: `${version} · port ${state.port}`, canStop: true };
-    case "installing":
-      return {
-        ...base,
-        tone: "busy",
-        title: `Downloading v${state.version}… ${Math.round(state.progress * 100)}%`,
-        detail: `You’re on ${version}.`,
-      };
+      return state.restarts > 0
+        ? { ...base, tone: "busy", title: "Restarting…", detail: `Attempt ${state.restarts} of ${MAX_RESTARTS} · port ${state.port}`, canStop: true }
+        : { ...base, tone: "busy", title: "Starting…", detail: `${version} · port ${state.port}`, canStop: true };
+    case "restarting":
+      return { ...base, tone: "busy", title: "Restarting…", detail: `${state.reason} Attempt ${state.attempt} of ${MAX_RESTARTS}.`, canStop: true };
+    case "crashed":
+      return { ...base, tone: "failed", title: "Stopped unexpectedly", detail: state.reason, canStart: true };
     case "failed":
       return { ...base, tone: "failed", title: "Couldn’t start", detail: state.reason, canStart: true };
     case "stopped":
     case "not_installed":
       return { ...base, tone: "stopped", title: "Stopped", detail: `${version} · start it to use the endpoint`, canStart: true };
   }
+}
+
+/** True while a proxy runs or is about to, so a port change has to restart it. */
+export function isLive(state: ProxyState): boolean {
+  return state.kind === "running" || state.kind === "starting" || state.kind === "restarting";
 }
 
 /** The OpenAI-compatible base URL AI tools use. */

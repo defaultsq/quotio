@@ -25,8 +25,10 @@ import {
   compareVersions,
   dashboardUrl,
   formatDate,
+  projectJob,
   projectServer,
   projectVersions,
+  type JobView,
   type ProxyStatus,
   type ServerTone,
   type ServerView,
@@ -55,10 +57,10 @@ export function ProxyPage() {
 
 function ServerCard({ status }: { status: ProxyStatus }) {
   const view = projectServer(status);
-  return view.kind === "not_installed" ? <InstallCard installing={view.installing} /> : <InstalledCard view={view} apiKey={status.api_key} />;
+  return view.kind === "not_installed" ? <InstallCard job={view.job} /> : <InstalledCard view={view} apiKey={status.api_key} />;
 }
 
-function InstallCard({ installing }: { installing: { version: string; percent: number } | null }) {
+function InstallCard({ job }: { job: JobView | null }) {
   const releases = useProxyReleases();
   const command = useProxyCommand();
   const latest = releases.data?.[0];
@@ -68,14 +70,12 @@ function InstallCard({ installing }: { installing: { version: string; percent: n
       <div className="flex items-center gap-4">
         <IconTile icon={RiServerLine} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-base leading-6 font-semibold text-text-strong-950">
-            {installing ? `Downloading v${installing.version}…` : "Not installed"}
-          </span>
-          <span className={cn("text-xs leading-4", error ? "text-state-error" : "text-text-sub-600")}>
+          <span className="text-base leading-6 font-semibold text-text-strong-950">{job ? job.title : "Not installed"}</span>
+          <span className={cn("text-xs leading-4 break-words", error ? "text-state-error" : "text-text-sub-600")}>
             {error
               ? error.message
-              : installing
-                ? "Quotio checks the download against GitHub’s checksum before using it."
+              : job
+                ? job.detail
                 : "Quotio downloads CLIProxyAPI from its GitHub releases and runs it on this computer."}
           </span>
         </div>
@@ -89,7 +89,20 @@ function InstallCard({ installing }: { installing: { version: string; percent: n
           {command.isPending ? "Installing…" : latest ? `Install v${latest.version}` : "Install"}
         </Button>
       </div>
-      {installing && <Progress percent={installing.percent} />}
+      {job?.percent != null && <Progress percent={job.percent} />}
+    </div>
+  );
+}
+
+/** The download or trial run in progress. */
+function JobRow({ job }: { job: JobView }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl bg-bg-weak-50 px-4 py-3">
+      <div className="flex flex-col gap-0.5">
+        <span className="text-sm leading-5 font-medium text-text-strong-950">{job.title}</span>
+        <span className="text-xs leading-4 text-text-sub-600">{job.detail}</span>
+      </div>
+      {job.percent != null && <Progress percent={job.percent} />}
     </div>
   );
 }
@@ -242,9 +255,14 @@ function VersionSection({ status }: { status: ProxyStatus }) {
   const command = useProxyCommand();
   const [managing, setManaging] = useState(false);
   const update = availableUpdate(status, releases.data);
-  const installing = status.state.kind === "installing";
+  const installing = status.job !== null;
   return (
-    <SettingsSection title="Version" description="Quotio keeps the two most recent versions so you can roll back." className="gap-3">
+    <SettingsSection
+      title="Version"
+      description="Quotio tries each new version on a spare port before switching to it, and keeps the two most recent versions so you can roll back."
+      className="gap-3"
+    >
+      {status.job && <JobRow job={projectJob(status.job)} />}
       {update ? (
         <div className="flex items-center gap-3 rounded-2xl bg-alpha-primary-10 px-4 py-3">
           <RiDownloadCloud2Line className="size-5 shrink-0 text-primary-base" />
@@ -298,17 +316,18 @@ function VersionsDialog({ open, onOpenChange, status }: { open: boolean; onOpenC
   const releases = useProxyReleases();
   const command = useProxyCommand();
   const rows = projectVersions(status, releases.data ?? []);
-  const busy = command.isPending || status.state.kind === "installing";
+  const busy = command.isPending || status.job !== null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>CLIProxyAPI versions</DialogTitle>
           <DialogDescription>
-            Switching restarts a running proxy. Installing a version keeps it and the one you’re on; older downloads are removed.
+            Switching restarts a running proxy. Installing a version tries it first, then keeps it and the one you’re on; older downloads are
+            removed.
           </DialogDescription>
         </DialogHeader>
-        {status.state.kind === "installing" && <Progress percent={Math.round(status.state.progress * 100)} />}
+        {status.job && <JobRow job={projectJob(status.job)} />}
         <div className="flex max-h-[320px] flex-col overflow-y-auto rounded-2xl border border-stroke-soft-200">
           {rows.map((row) => (
             <div key={row.version} className="flex items-center gap-3 border-t border-stroke-soft-200 px-4 py-2.5 first:border-t-0">

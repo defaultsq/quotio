@@ -1,6 +1,7 @@
-//! Owns the optional CLIProxyAPI server: install from GitHub releases, run it as a child,
-//! health-check it, switch versions, and stop it with the app. Mirrors the macOS app's
-//! ProxyLifecycleController.swift, minus its port-holder killing: a busy port is reported, not freed.
+//! Owns the optional CLIProxyAPI server: install from GitHub releases after a trial run, run it
+//! as a child, watch its health, restart it when it crashes, switch versions, and stop it with
+//! the app. Mirrors the macOS app's ProxyLifecycleController.swift, minus its port-holder killing:
+//! a busy port is reported, not freed.
 //!
 //! Layout under `<app data>/cliproxyapi/`: one directory per installed version holding the
 //! binary, `active` (the version to run), `config.yaml`, `management-key`, and `proxy.log`.
@@ -13,12 +14,15 @@ use serde::Serialize;
 use std::{
     fs,
     net::TcpListener,
-    path::PathBuf,
-    process::{Child, Command, Stdio},
+    ops::RangeInclusive,
+    path::{Path, PathBuf},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_store::StoreExt;
 
 const STATUS_EVENT: &str = "proxy-status";
 const KEEP_VERSIONS: usize = 2;
@@ -28,22 +32,47 @@ const HEALTH_RETRY: Duration = Duration::from_millis(250);
 const EXIT_POLL: Duration = Duration::from_millis(500);
 const STOP_GRACE: Duration = Duration::from_secs(2);
 const PID_FILE: &str = "proxy.pid";
+const TRIAL_LOG: &str = "trial.log";
+const TRIAL_PORTS: RangeInclusive<u16> = 18_000..=18_100;
+/// The health monitor's cadence and patience, as on macOS: a check every 30 s with a 3 s
+/// timeout, and a restart after three misses in a row.
+const CHECK_INTERVAL: Duration = Duration::from_secs(30);
+const CHECK_TIMEOUT: Duration = Duration::from_secs(3);
+const MISSED_CHECKS_LIMIT: u8 = 3;
+/// Automatic restarts allowed before the proxy stays down; a passed health check refills them.
+/// `src/features/proxy/model.ts` shows the same number.
+const MAX_RESTARTS: u8 = 3;
 
+/// The server process. Install jobs run beside it (`ProxyJob`), so an update never hides it.
 #[derive(Clone, Serialize, PartialEq, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProxyState {
     NotInstalled,
-    Installing { version: String, progress: f32 },
     Stopped,
-    Starting { port: u16 },
-    Running { port: u16, pid: u32 },
+    /// `restarts` counts automatic restarts since the proxy last passed a health check.
+    Starting { port: u16, restarts: u8 },
+    Running { port: u16, pid: u32, restarts: u8, missed_checks: u8 },
+    /// Exited or stopped answering on its own; starts again after a backoff.
+    Restarting { port: u16, attempt: u8, reason: String },
+    /// Exited or stopped answering on its own and used up its automatic restarts.
+    Crashed { reason: String },
+    /// A start the user asked for didn't work.
     Failed { reason: String },
+}
+
+#[derive(Clone, Serialize, PartialEq, Debug)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProxyJob {
+    Downloading { version: String, progress: f32 },
+    /// The trial run: the new version on a spare port with a throwaway config.
+    Testing { version: String, port: u16 },
 }
 
 /// Everything the CLIProxyAPI page shows, sent whole on every change.
 #[derive(Clone, Serialize)]
 pub struct ProxyStatus {
     state: ProxyState,
+    job: Option<ProxyJob>,
     active: Option<String>,
     /// Newest first.
     installed: Vec<String>,
@@ -52,7 +81,9 @@ pub struct ProxyStatus {
 
 struct Inner {
     state: ProxyState,
+    job: Option<ProxyJob>,
     child: Option<Child>,
+    trial: Option<Child>,
 }
 
 pub struct Proxy {
@@ -60,13 +91,27 @@ pub struct Proxy {
     root: PathBuf,
     auth_dir: PathBuf,
     inner: Mutex<Inner>,
-    /// Serializes install, start, stop and version switches; `inner` alone guards the state.
+    /// Serializes install, start, stop, automatic restarts and version switches; `inner` alone guards the state.
     lifecycle: tokio::sync::Mutex<()>,
     github: reqwest::Client,
     local: reqwest::Client,
 }
 
 type Result<T> = std::result::Result<T, String>;
+
+/// What follows when a running proxy exits or stops answering without being asked to.
+fn after_crash(port: u16, restarts: u8, reason: String) -> ProxyState {
+    if restarts < MAX_RESTARTS {
+        ProxyState::Restarting { port, attempt: restarts + 1, reason }
+    } else {
+        ProxyState::Crashed { reason: format!("{reason} Quotio stopped restarting it after {MAX_RESTARTS} tries.") }
+    }
+}
+
+/// 2 s, 4 s, 8 s, as on macOS.
+fn restart_delay(attempt: u8) -> Duration {
+    Duration::from_secs(1 << attempt.min(MAX_RESTARTS))
+}
 
 impl Proxy {
     pub fn new(app: &AppHandle) -> tauri::Result<Arc<Self>> {
@@ -77,7 +122,7 @@ impl Proxy {
             app: app.clone(),
             root,
             auth_dir,
-            inner: Mutex::new(Inner { state: ProxyState::NotInstalled, child: None }),
+            inner: Mutex::new(Inner { state: ProxyState::NotInstalled, job: None, child: None, trial: None }),
             lifecycle: tokio::sync::Mutex::new(()),
             github: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(15))
@@ -94,19 +139,40 @@ impl Proxy {
     }
 
     pub fn status(&self) -> ProxyStatus {
-        ProxyStatus {
-            state: self.inner.lock().unwrap().state.clone(),
-            active: self.active(),
-            installed: self.installed(),
-            api_key: config::api_key(&self.root),
+        let (state, job) = {
+            let inner = self.inner.lock().unwrap();
+            (inner.state.clone(), inner.job.clone())
+        };
+        ProxyStatus { state, job, active: self.active(), installed: self.installed(), api_key: config::api_key(&self.root) }
+    }
+
+    fn emit(&self) {
+        if let Err(error) = self.app.emit(STATUS_EVENT, self.status()) {
+            eprintln!("quotio-desktop: cannot send the CLIProxyAPI status: {error}");
         }
     }
 
     fn set_state(&self, state: ProxyState) {
         self.inner.lock().unwrap().state = state;
-        if let Err(error) = self.app.emit(STATUS_EVENT, self.status()) {
-            eprintln!("quotio-desktop: cannot send the CLIProxyAPI status: {error}");
-        }
+        self.emit();
+    }
+
+    /// Moves to the state `step` returns, checked and applied under one lock so a crash, a
+    /// health check and a user's Stop cannot overwrite each other. Returns the new state.
+    fn update(&self, step: impl FnOnce(&ProxyState) -> Option<ProxyState>) -> Option<ProxyState> {
+        let next = {
+            let mut inner = self.inner.lock().unwrap();
+            let next = step(&inner.state).filter(|next| *next != inner.state)?;
+            inner.state = next.clone();
+            next
+        };
+        self.emit();
+        Some(next)
+    }
+
+    fn set_job(&self, job: Option<ProxyJob>) {
+        self.inner.lock().unwrap().job = job;
+        self.emit();
     }
 
     /// What the proxy is when nothing runs: stopped once a version is active.
@@ -140,9 +206,10 @@ impl Proxy {
         self.root.join(version).join(BINARY)
     }
 
+    /// The port of a proxy that runs or is about to, which a version switch restarts onto.
     fn running_port(&self) -> Option<u16> {
         match self.inner.lock().unwrap().state {
-            ProxyState::Running { port, .. } | ProxyState::Starting { port } => Some(port),
+            ProxyState::Running { port, .. } | ProxyState::Starting { port, .. } | ProxyState::Restarting { port, .. } => Some(port),
             _ => None,
         }
     }
@@ -163,24 +230,40 @@ impl Proxy {
         self.start_locked(port).await
     }
 
-    /// Downloads, verifies and activates `version`, keeping the version it replaces for rollback.
+    /// Downloads `version`, runs it on trial, and only then activates it, keeping the version it
+    /// replaces for rollback. A version that fails its trial is removed and never runs for real.
     /// A running proxy restarts on the new version; if that fails, the previous one comes back.
     pub async fn install(self: &Arc<Self>, version: String) -> Result<()> {
+        if !release::is_version(&version) {
+            return Err(format!("“{version}” isn’t a CLIProxyAPI version."));
+        }
         let _guard = self.lifecycle.lock().await;
-        let before = self.inner.lock().unwrap().state.clone();
-        let running_port = self.running_port();
-        // Installing shows in place of the current state, which comes back once the files are in place.
-        let downloaded = self.download(&version).await;
-        self.set_state(before);
-        downloaded?;
+        let fresh = !self.binary(&version).is_file();
+        let tried = match self.download(&version).await {
+            Ok(()) => self.trial(&version).await,
+            Err(reason) => Err(reason),
+        };
+        self.set_job(None);
         let previous = self.active();
+        if let Err(reason) = tried {
+            if fresh {
+                let _ = fs::remove_dir_all(self.root.join(&version));
+            }
+            if previous.is_some() {
+                self.notify("CLIProxyAPI update failed", &reason);
+            }
+            return Err(reason);
+        }
         self.activate_and_prune(&version, previous.as_deref())?;
-        let Some(port) = running_port else {
+        let Some(port) = self.running_port() else {
             self.set_state(ProxyState::Stopped);
             return Ok(());
         };
         self.stop_locked().await;
         let Err(reason) = self.start_locked(port).await else {
+            if previous.is_some_and(|previous| previous != version) {
+                self.notify(&format!("CLIProxyAPI v{version} is running"), "It passed its trial run, so Quotio switched to it.");
+            }
             return Ok(());
         };
         if let Some(previous) = previous {
@@ -192,9 +275,6 @@ impl Proxy {
     }
 
     async fn download(&self, version: &str) -> Result<()> {
-        if !release::is_version(version) {
-            return Err(format!("“{version}” isn’t a CLIProxyAPI version."));
-        }
         if self.binary(version).is_file() {
             return Ok(());
         }
@@ -202,7 +282,7 @@ impl Proxy {
         let mut progress = |progress: f32| {
             if progress - reported >= 0.01 || progress >= 1.0 {
                 reported = progress;
-                self.set_state(ProxyState::Installing { version: version.to_owned(), progress });
+                self.set_job(Some(ProxyJob::Downloading { version: version.to_owned(), progress }));
             }
         };
         progress(0.0);
@@ -222,6 +302,65 @@ impl Proxy {
         })
         .await
         .map_err(|error| error.to_string())?
+    }
+
+    /// The macOS app's dry run: start `version` on a spare port with a throwaway config and
+    /// management key, and wait for its management API to answer.
+    async fn trial(&self, version: &str) -> Result<()> {
+        let taken = self.running_port();
+        let mut ports = TRIAL_PORTS;
+        let port = ports
+            .find(|port| Some(*port) != taken && port_free(*port))
+            .ok_or("Quotio found no free port from 18000 to 18100 to try the new version on.")?;
+        eprintln!("quotio-desktop: trying CLIProxyAPI v{version} on port {port}");
+        self.set_job(Some(ProxyJob::Testing { version: version.to_owned(), port }));
+        let (config_path, management_key) = config::trial(&self.root, &self.auth_dir, port)
+            .map_err(|error| format!("Couldn’t write the trial configuration: {error}"))?;
+        let log = self.root.join(TRIAL_LOG);
+        let outcome = match spawn(&self.binary(version), &config_path, &self.root.join(version), &log) {
+            Ok(child) => {
+                let pid = child.id();
+                self.inner.lock().unwrap().trial = Some(child);
+                self.await_trial(pid, port, &management_key).await
+            }
+            Err(reason) => Err(reason),
+        };
+        let child = self.inner.lock().unwrap().trial.take();
+        if let Some(child) = child {
+            let _ = tauri::async_runtime::spawn_blocking(move || terminate(child)).await;
+        }
+        let _ = fs::remove_file(&config_path);
+        let _ = fs::remove_file(&log);
+        outcome.map_err(|ending| format!("v{version} didn’t pass its trial run: {ending}"))
+    }
+
+    async fn await_trial(&self, pid: u32, port: u16, management_key: &str) -> Result<()> {
+        let deadline = Instant::now() + HEALTH_TIMEOUT;
+        loop {
+            let exited = {
+                let mut inner = self.inner.lock().unwrap();
+                match inner.trial.as_mut().filter(|child| child.id() == pid).map(Child::try_wait) {
+                    Some(Ok(None)) => None,
+                    Some(Ok(Some(status))) => Some(describe_exit(status)),
+                    Some(Err(error)) => Some(error.to_string()),
+                    None => Some("Quotio quit".into()),
+                }
+            };
+            if let Some(exit) = exited {
+                let line = last_line(&self.root.join(TRIAL_LOG));
+                return Err(match line {
+                    Some(line) => format!("it {exit} ({line})."),
+                    None => format!("it {exit}."),
+                });
+            }
+            if self.healthy(port, management_key, CHECK_TIMEOUT).await {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err("it didn’t answer within 10 seconds.".into());
+            }
+            tokio::time::sleep(HEALTH_RETRY).await;
+        }
     }
 
     fn write_active(&self, version: &str) -> Result<()> {
@@ -259,10 +398,10 @@ impl Proxy {
     }
 
     async fn start_locked(self: &Arc<Self>, port: u16) -> Result<()> {
-        if self.running_port() == Some(port) {
+        if matches!(self.inner.lock().unwrap().state, ProxyState::Running { port: running, .. } if running == port) {
             return Ok(());
         }
-        let result = self.launch(port).await;
+        let result = self.launch(port, 0).await;
         if let Err(reason) = &result {
             self.terminate_child().await;
             self.set_state(ProxyState::Failed { reason: reason.clone() });
@@ -270,45 +409,34 @@ impl Proxy {
         result
     }
 
-    async fn launch(self: &Arc<Self>, port: u16) -> Result<()> {
+    async fn launch(self: &Arc<Self>, port: u16, restarts: u8) -> Result<()> {
         let version = self.active().ok_or("CLIProxyAPI isn’t installed.")?;
         if port == 0 || (!port_free(port) && !self.reclaim_orphan(port).await) {
             return Err(format!("Port {port} is in use by another program. Choose another port."));
         }
         let management_key = config::prepare(&self.root, &self.auth_dir, port)
             .map_err(|error| format!("Couldn’t write the configuration: {error}"))?;
-        let log = fs::File::create(self.root.join("proxy.log")).map_err(|error| error.to_string())?;
-        let mut command = Command::new(self.binary(&version));
-        command
-            .arg("-config")
-            .arg(self.root.join(config::FILE))
-            .current_dir(self.root.join(&version))
-            .stdin(Stdio::null())
-            .stdout(log.try_clone().map_err(|error| error.to_string())?)
-            .stderr(log);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
-        let child = command.spawn().map_err(|error| format!("Couldn’t launch CLIProxyAPI: {error}"))?;
+        let child = spawn(
+            &self.binary(&version),
+            &self.root.join(config::FILE),
+            &self.root.join(&version),
+            &self.root.join("proxy.log"),
+        )?;
         let pid = child.id();
         if let Err(error) = fs::write(self.root.join(PID_FILE), pid.to_string()) {
             eprintln!("quotio-desktop: cannot record the CLIProxyAPI PID: {error}");
         }
         self.inner.lock().unwrap().child = Some(child);
-        self.set_state(ProxyState::Starting { port });
-        let watcher = self.clone();
-        std::thread::spawn(move || watcher.watch(pid));
+        self.set_state(ProxyState::Starting { port, restarts });
+        tauri::async_runtime::spawn(self.clone().supervise(pid, port, management_key.clone()));
 
         let deadline = Instant::now() + HEALTH_TIMEOUT;
         loop {
             if !self.is_child(pid) {
                 return Err(self.exit_reason());
             }
-            if self.healthy(port, &management_key).await {
-                self.set_state(ProxyState::Running { port, pid });
+            if self.healthy(port, &management_key, CHECK_TIMEOUT).await {
+                self.set_state(ProxyState::Running { port, pid, restarts, missed_checks: 0 });
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -329,7 +457,7 @@ impl Proxy {
         let Some(pid) = pid else {
             return false;
         };
-        if !self.healthy(port, &key).await {
+        if !self.healthy(port, &key, CHECK_TIMEOUT).await {
             return false;
         }
         eprintln!("quotio-desktop: stopping CLIProxyAPI {pid} left over from an earlier session");
@@ -344,10 +472,11 @@ impl Proxy {
         true
     }
 
-    async fn healthy(&self, port: u16, management_key: &str) -> bool {
+    async fn healthy(&self, port: u16, management_key: &str, timeout: Duration) -> bool {
         self.local
             .get(format!("http://127.0.0.1:{port}/v0/management/debug"))
             .bearer_auth(management_key)
+            .timeout(timeout)
             .send()
             .await
             .is_ok_and(|response| response.status().is_success())
@@ -357,35 +486,149 @@ impl Proxy {
         self.inner.lock().unwrap().child.as_ref().is_some_and(|child| child.id() == pid)
     }
 
-    /// Notices when the child exits on its own; returns once it is gone or replaced.
-    fn watch(&self, pid: u32) {
+    /// Watches one child until it is gone or replaced: notices when it exits on its own, and
+    /// once it runs, checks its health every 30 s.
+    async fn supervise(self: Arc<Self>, pid: u32, port: u16, management_key: String) {
+        let mut next_check = Instant::now() + CHECK_INTERVAL;
         loop {
-            std::thread::sleep(EXIT_POLL);
-            let mut inner = self.inner.lock().unwrap();
-            let Some(child) = inner.child.as_mut().filter(|child| child.id() == pid) else {
+            tokio::time::sleep(EXIT_POLL).await;
+            let exited = {
+                let mut inner = self.inner.lock().unwrap();
+                let Some(child) = inner.child.as_mut().filter(|child| child.id() == pid) else {
+                    return;
+                };
+                let status = child.try_wait().ok().flatten();
+                if status.is_some() {
+                    inner.child = None;
+                }
+                status
+            };
+            if let Some(status) = exited {
+                eprintln!("quotio-desktop: CLIProxyAPI exited ({status})");
+                self.crashed(pid, status);
                 return;
-            };
-            let Ok(Some(status)) = child.try_wait() else {
-                continue;
-            };
-            inner.child = None;
-            let starting = matches!(inner.state, ProxyState::Starting { .. });
-            drop(inner);
-            eprintln!("quotio-desktop: CLIProxyAPI exited ({status})");
-            // While starting, `launch` reports the failure itself.
-            if !starting {
-                self.set_state(ProxyState::Failed { reason: self.exit_reason() });
             }
+            if Instant::now() < next_check {
+                continue;
+            }
+            next_check = Instant::now() + CHECK_INTERVAL;
+            let healthy = self.healthy(port, &management_key, CHECK_TIMEOUT).await;
+            if self.record_check(pid, healthy) {
+                self.recover(pid).await;
+                return;
+            }
+        }
+    }
+
+    /// Counts a health check against the running proxy. True once it has missed enough in a row
+    /// to restart; a passed check also refills the automatic restarts.
+    fn record_check(&self, pid: u32, healthy: bool) -> bool {
+        let next = self.update(|state| match *state {
+            ProxyState::Running { port, pid: running, restarts, missed_checks } if running == pid => Some(if healthy {
+                ProxyState::Running { port, pid, restarts: 0, missed_checks: 0 }
+            } else {
+                ProxyState::Running { port, pid, restarts, missed_checks: missed_checks + 1 }
+            }),
+            _ => None,
+        });
+        if !healthy {
+            eprintln!("quotio-desktop: CLIProxyAPI missed a health check");
+        }
+        matches!(next, Some(ProxyState::Running { missed_checks, .. }) if missed_checks >= MISSED_CHECKS_LIMIT)
+    }
+
+    /// The child exited without being asked to. While it starts, `launch` reports that itself.
+    fn crashed(self: &Arc<Self>, pid: u32, status: ExitStatus) {
+        let exit = describe_exit(status);
+        // After a signal the log's last line is unrelated traffic, often our own health check.
+        let reason = match status.code().and(last_line(&self.root.join("proxy.log"))) {
+            Some(line) => format!("CLIProxyAPI {exit}: {line}"),
+            None => format!("CLIProxyAPI {exit}."),
+        };
+        let next = self.update(|state| match *state {
+            ProxyState::Running { port, pid: running, restarts, .. } if running == pid => Some(after_crash(port, restarts, reason)),
+            _ => None,
+        });
+        let Some(next) = next else {
+            return;
+        };
+        if !status.success() {
+            let outcome = match next {
+                ProxyState::Restarting { .. } => "Quotio is restarting it.".to_owned(),
+                _ => format!("Quotio stopped restarting it after {MAX_RESTARTS} tries."),
+            };
+            self.notify("CLIProxyAPI crashed", &format!("It {exit}. {outcome}"));
+        }
+        self.schedule_restart(&next);
+    }
+
+    /// The proxy runs but stopped answering: stop it and restart it like a crash.
+    async fn recover(self: &Arc<Self>, pid: u32) {
+        let _guard = self.lifecycle.lock().await;
+        if !self.is_child(pid) {
             return;
         }
+        eprintln!("quotio-desktop: CLIProxyAPI stopped answering; restarting it");
+        self.terminate_child().await;
+        let reason = format!("CLIProxyAPI stopped answering {MISSED_CHECKS_LIMIT} health checks in a row.");
+        let next = self.update(|state| match *state {
+            ProxyState::Running { port, restarts, .. } => Some(after_crash(port, restarts, reason)),
+            _ => None,
+        });
+        if let Some(next) = next {
+            self.schedule_restart(&next);
+        }
+    }
+
+    fn schedule_restart(self: &Arc<Self>, state: &ProxyState) {
+        let ProxyState::Restarting { attempt, .. } = *state else {
+            return;
+        };
+        let proxy = self.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(restart_delay(attempt)).await;
+            let _guard = proxy.lifecycle.lock().await;
+            // A Start, Stop or version switch in the meantime takes over from this restart.
+            let port = match proxy.inner.lock().unwrap().state {
+                ProxyState::Restarting { port, attempt: pending, .. } if pending == attempt => port,
+                _ => return,
+            };
+            eprintln!("quotio-desktop: restarting CLIProxyAPI (attempt {attempt} of {MAX_RESTARTS})");
+            let Err(reason) = proxy.launch(port, attempt).await else {
+                return;
+            };
+            proxy.terminate_child().await;
+            let next = after_crash(port, attempt, reason);
+            if let ProxyState::Crashed { reason } = &next {
+                proxy.notify("CLIProxyAPI stopped", reason);
+            }
+            proxy.set_state(next.clone());
+            proxy.schedule_restart(&next);
+        });
     }
 
     /// The last line CLIProxyAPI logged, which usually names why it stopped.
     fn exit_reason(&self) -> String {
-        let log = fs::read_to_string(self.root.join("proxy.log")).unwrap_or_default();
-        match log.lines().rev().find(|line| !line.trim().is_empty()) {
-            Some(line) => format!("CLIProxyAPI stopped: {}", line.chars().take(240).collect::<String>()),
+        match last_line(&self.root.join("proxy.log")) {
+            Some(line) => format!("CLIProxyAPI stopped: {line}"),
             None => "CLIProxyAPI stopped unexpectedly.".into(),
+        }
+    }
+
+    /// Sends a system notification unless the user turned notifications off. That switch lives
+    /// in the webview's preferences (`src/lib/preferences.ts`), which the store plugin holds.
+    fn notify(&self, title: &str, body: &str) {
+        let enabled = self
+            .app
+            .get_store("preferences.json")
+            .and_then(|store| store.get("preferences"))
+            .and_then(|preferences| preferences.pointer("/notifications/enabled")?.as_bool())
+            .unwrap_or(true);
+        if !enabled {
+            return;
+        }
+        if let Err(error) = self.app.notification().builder().title(title).body(body).show() {
+            eprintln!("quotio-desktop: cannot show a notification: {error}");
         }
     }
 
@@ -402,11 +645,18 @@ impl Proxy {
         }
     }
 
-    /// Stops the child when the app exits.
+    /// Stops the child, and a trial run in progress, when the app exits.
     pub fn shutdown(&self) {
-        if let Some(child) = self.inner.lock().unwrap().child.take() {
+        let (child, trial) = {
+            let mut inner = self.inner.lock().unwrap();
+            (inner.child.take(), inner.trial.take())
+        };
+        if let Some(child) = child {
             terminate(child);
             let _ = fs::remove_file(self.root.join(PID_FILE));
+        }
+        if let Some(trial) = trial {
+            terminate(trial);
         }
     }
 
@@ -416,6 +666,47 @@ impl Proxy {
 
     pub fn management_key(&self) -> Result<String> {
         config::management_key(&self.root).map_err(|error| error.to_string())
+    }
+}
+
+/// Runs `binary -config <config>` from `cwd`, with stdout and stderr in a fresh `log`.
+fn spawn(binary: &Path, config: &Path, cwd: &Path, log: &Path) -> Result<Child> {
+    let log = fs::File::create(log).map_err(|error| error.to_string())?;
+    let mut command = Command::new(binary);
+    command
+        .arg("-config")
+        .arg(config)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(log.try_clone().map_err(|error| error.to_string())?)
+        .stderr(log);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command.spawn().map_err(|error| format!("Couldn’t launch CLIProxyAPI: {error}"))
+}
+
+fn last_line(log: &Path) -> Option<String> {
+    let log = fs::read_to_string(log).unwrap_or_default();
+    let line = log.lines().rev().find(|line| !line.trim().is_empty())?;
+    Some(line.chars().take(240).collect())
+}
+
+/// "exited with code 2" or, on Unix, "was stopped by signal 9".
+fn describe_exit(status: ExitStatus) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return format!("was stopped by signal {signal}");
+        }
+    }
+    match status.code() {
+        Some(code) => format!("exited with code {code}"),
+        None => "exited".into(),
     }
 }
 
