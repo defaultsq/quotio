@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { RiAddCircleLine, RiAddLine, RiArrowDownSLine, RiRefreshLine, RiSearchLine } from "@remixicon/react";
 import { PageHeader } from "@/components/page-header";
 import { ProviderLogo } from "@/components/provider-logo";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api/client";
+import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 import { AccountRow } from "./account-row";
 import { AttentionPanel } from "./attention-panel";
@@ -219,13 +220,4 @@ function LoadError({ error, onRetry }: { error: Error; onRetry: () => void }) {
       )}
     </div>
   );
-}
-
-function useNow(intervalMs: number): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [intervalMs]);
-  return now;
 }

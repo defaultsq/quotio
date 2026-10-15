@@ -4,7 +4,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { refreshLaunchAtLogin } from "@/features/settings/launch-at-login";
+import { restoreSharing } from "@/features/sharing/queries";
 import { ApiError } from "@/lib/api/client";
+import { loadPreferences } from "@/lib/preferences";
+import { startTheme } from "@/lib/theme";
 import { App } from "./app/app";
 
 const queryClient = new QueryClient({
@@ -15,6 +19,12 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Preferences load before the first render so the theme and hidden names never flash.
+await loadPreferences();
+startTheme();
+void refreshLaunchAtLogin();
+void restoreSharing(queryClient);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

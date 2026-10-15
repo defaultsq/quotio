@@ -1,4 +1,5 @@
 import { RiCheckboxCircleFill, RiErrorWarningLine } from "@remixicon/react";
+import { SensitiveText } from "@/components/sensitive-text";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatReset } from "./format";
@@ -17,9 +18,9 @@ export function AccountRow({ view, now }: { view: AccountView; now: number }) {
     <div className="flex items-center gap-6 border-b border-stroke-soft-200 px-4 py-3.5 last:border-b-0">
       <div className="flex w-[220px] shrink-0 flex-col gap-0.5">
         <div className="flex items-center gap-1.5">
-          <span className="truncate text-sm leading-5 font-medium tracking-[-0.084px] text-text-strong-950">
+          <SensitiveText className="truncate text-sm leading-5 font-medium tracking-[-0.084px] text-text-strong-950">
             {account.display_name}
-          </span>
+          </SensitiveText>
           {account.active && (
             <Tooltip>
               <TooltipTrigger asChild>

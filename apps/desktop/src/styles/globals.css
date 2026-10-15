@@ -2,8 +2,8 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* The app follows the system appearance; Tauri's window theme drives this media query. */
-@custom-variant dark (@media (prefers-color-scheme: dark));
+/* src/lib/theme.ts sets `.dark` from the theme preference, or from the system appearance for System. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* Design tokens from the Wonder export (tokens.json), names unchanged. */
 :root {
@@ -18,6 +18,7 @@
   --primary-base-2: #335cff;
   --alpha-primary-alpha-10: #1fc16b1a;
   --alpha-red-alpha-10: #fb37481a;
+  --alpha-away-alpha-10: #fff6e0;
   --state-error-base: #fb3748;
   --state-away-base: #f6b51e;
   --state-stable-base: #22d3bb;
@@ -56,28 +57,27 @@
 }
 
 /* Dark: the neutral scale inverts, hues stay. */
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --bg-white-0: #1c1c1c;
-    --bg-weak-50: #111111;
-    --stroke-soft-200: #2e2e2e;
-    --text-strong-950: #f7f7f7;
-    --text-sub-600: #a3a3a3;
-    --text-soft-400: #7b7b7b;
-    --text-disabled-300: #474747;
-    --state-feature-lighter: #7d52f429;
-    --state-faded-base: #a3a3a3;
-    --state-faded-lighter: #262626;
-    --state-success-dark: #c2f5da;
-    --state-success-light: #1daf6133;
-    --alpha-red-alpha-10: #fb374829;
+:root.dark {
+  color-scheme: dark;
+  --bg-white-0: #1c1c1c;
+  --bg-weak-50: #111111;
+  --stroke-soft-200: #2e2e2e;
+  --text-strong-950: #f7f7f7;
+  --text-sub-600: #a3a3a3;
+  --text-soft-400: #7b7b7b;
+  --text-disabled-300: #474747;
+  --state-feature-lighter: #7d52f429;
+  --state-faded-base: #a3a3a3;
+  --state-faded-lighter: #262626;
+  --state-success-dark: #c2f5da;
+  --state-success-light: #1daf6133;
+  --alpha-red-alpha-10: #fb374829;
+  --alpha-away-alpha-10: #f6b51e29;
 
-    --shadow-raised: 0px 1px 2px rgba(0, 0, 0, 0.3), 0px 0px 0px 1px rgba(255, 255, 255, 0.08);
-    --shadow-button: 0px 1px 2px rgba(0, 0, 0, 0.3), 0px 0px 0px 1px rgba(255, 255, 255, 0.1);
-    --shadow-card: 0px 3px 3px -1.5px rgba(0, 0, 0, 0.2), 0px 1px 1px -0.5px rgba(0, 0, 0, 0.2),
-      0px 0px 0px 1px rgba(255, 255, 255, 0.08);
-  }
+  --shadow-raised: 0px 1px 2px rgba(0, 0, 0, 0.3), 0px 0px 0px 1px rgba(255, 255, 255, 0.08);
+  --shadow-button: 0px 1px 2px rgba(0, 0, 0, 0.3), 0px 0px 0px 1px rgba(255, 255, 255, 0.1);
+  --shadow-card: 0px 3px 3px -1.5px rgba(0, 0, 0, 0.2), 0px 1px 1px -0.5px rgba(0, 0, 0, 0.2),
+    0px 0px 0px 1px rgba(255, 255, 255, 0.08);
 }
 
 @theme inline {
@@ -94,6 +94,7 @@
   --color-primary-base-2: var(--primary-base-2);
   --color-alpha-primary-10: var(--alpha-primary-alpha-10);
   --color-alpha-red-10: var(--alpha-red-alpha-10);
+  --color-alpha-away-10: var(--alpha-away-alpha-10);
   --color-state-error: var(--state-error-base);
   --color-state-away: var(--state-away-base);
   --color-state-stable: var(--state-stable-base);

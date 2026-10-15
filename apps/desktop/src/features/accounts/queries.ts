@@ -7,7 +7,7 @@ const SNAPSHOT_POLL_MS = 15_000;
 const OPERATION_POLL_MS = 750;
 const OPERATION_DEADLINE_MS = 90_000;
 
-const keys = { snapshot: ["snapshot"], providers: ["providers"] } as const;
+const keys = { snapshot: ["snapshot"], providers: ["providers"], discovery: ["discovery"] } as const;
 
 export function useAccountsView() {
   const snapshot = useQuery({ queryKey: keys.snapshot, queryFn: api.snapshot, refetchInterval: SNAPSHOT_POLL_MS });
@@ -27,6 +27,23 @@ export function useRefresh() {
   return useMutation({
     mutationFn: async (request: RefreshRequest) => settle(await api.refresh(request)),
     onSettled: () => client.invalidateQueries({ queryKey: keys.snapshot }),
+  });
+}
+
+export function useDiscovery() {
+  return useQuery({ queryKey: keys.discovery, queryFn: api.discovery });
+}
+
+/** Scans every provider for logins already on this computer, then re-reads what the scan found. */
+export function useScan() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async () => settle(await api.discover()),
+    onSettled: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: keys.discovery }),
+        client.invalidateQueries({ queryKey: keys.snapshot }),
+      ]),
   });
 }
 

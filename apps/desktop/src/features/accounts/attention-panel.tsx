@@ -1,4 +1,5 @@
 import { RiAlertLine, RiErrorWarningLine, RiKey2Line } from "@remixicon/react";
+import { SensitiveText } from "@/components/sensitive-text";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { AttentionItem } from "./model";
@@ -25,7 +26,6 @@ function AttentionRow({ item }: { item: AttentionItem }) {
   const refresh = useRefresh();
   const Icon = item.severity === "error" ? RiErrorWarningLine : RiKey2Line;
   const retry = item.retry;
-  const subject =item.account ? ` · ${item.account.display_name}` : "";
   return (
     <div className="flex items-center gap-3 rounded-xl bg-bg-white-0 px-3 py-2.5 shadow-raised">
       <div
@@ -39,7 +39,12 @@ function AttentionRow({ item }: { item: AttentionItem }) {
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-sm leading-5 font-medium tracking-[-0.084px] text-text-strong-950">
           {item.title}
-          <span className="text-text-soft-400">{subject}</span>
+          {item.account && (
+            <span className="text-text-soft-400">
+              {" · "}
+              <SensitiveText>{item.account.display_name}</SensitiveText>
+            </span>
+          )}
         </span>
         <span className="text-xs leading-4 text-text-sub-600">{item.detail}</span>
       </div>

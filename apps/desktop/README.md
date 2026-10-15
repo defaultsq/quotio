@@ -34,4 +34,6 @@ pnpm sidecar --release && pnpm tauri build
 - `src-tauri/src/sidecar.rs` owns the child process. It writes the bootstrap token to stdin, reads the bound port from stdout, and closes stdin on exit to stop the server.
 - The webview calls one Tauri command, `api(method, path, body)`, which proxies `/v2/*` requests with the bearer token. The token never reaches the webview.
 - `src/lib/api` holds the generated OpenAPI types and the typed client. `src/features/accounts/model.ts` projects the snapshot into the view model that components render.
+- Host settings (refresh interval, login discovery) live in the host and go through `/v2/settings`. App preferences (theme, hidden names, notification alerts, launch at login, sharing listeners to restore) live in `src/lib/preferences.ts`, one versioned record in the store plugin's `preferences.json`.
+- The host keeps iPhone sharing listeners in memory only, so the app re-enables the saved ones at launch.
 - The UI uses React 19, Tailwind CSS v4, shadcn/ui, TanStack Query, and the design tokens in `src/styles/globals.css`.

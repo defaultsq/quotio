@@ -12,6 +12,17 @@ export type Provider = Schemas["ProviderDescriptor"];
 export type ProviderId = Schemas["ProviderId"];
 export type Operation = Schemas["Operation"];
 export type RefreshRequest = Schemas["RefreshRequest"];
+export type HostStatus = Schemas["Status"];
+export type Settings = Schemas["SettingsView"];
+export type SettingsPatch = Schemas["SettingsPatch"];
+export type Discovery = Schemas["V2Discovery"];
+export type SharingUpdate = Schemas["CompanionSharingUpdate"];
+export type SharingAddress = NonNullable<Schemas["CompanionSharing"]["addresses"]>[number];
+export type SharingEndpoint = Pick<Schemas["CompanionSharing"], "enabled" | "listen" | "public_url" | "mode" | "certificate">;
+// The OpenAPI document predates per-mode listeners; the host also returns `endpoints` and, on GET, `addresses`.
+export type Sharing = SharingEndpoint & { endpoints: SharingEndpoint[]; addresses?: SharingAddress[] };
+export type Client = Schemas["ClientInfo"];
+export type ClientCreated = Schemas["ClientCreated"];
 
 /** Why a request failed, as the UI needs to tell the cases apart. */
 export type ApiFailure =
@@ -29,7 +40,7 @@ export class ApiError extends Error {
   }
 }
 
-type Method = "GET" | "POST" | "PATCH" | "DELETE";
+type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 async function request(method: Method, path: `/v2/${string}`, body?: unknown): Promise<unknown> {
   let response: { status: number; body: unknown };
@@ -83,9 +94,42 @@ function parseOperation(body: unknown): Operation {
   return body as Operation;
 }
 
+function parseVersioned<T>(what: string, body: unknown, check: (body: Record<string, unknown>) => boolean): T {
+  if (!isRecord(body) || body.schema_version !== 2 || !check(body)) invalid(what);
+  return body as T;
+}
+
+function parseSettings(body: unknown): Settings {
+  if (!isRecord(body) || typeof body.revision !== "string" || typeof body.refresh_interval !== "number") invalid("settings");
+  return body as Settings;
+}
+
 export const api = {
   snapshot: async () => parseSnapshot(await request("GET", "/v2/snapshot")),
   providers: async () => parseProviders(await request("GET", "/v2/providers")),
   refresh: async (body: RefreshRequest) => parseOperation(await request("POST", "/v2/refresh", body)),
   operation: async (id: string) => parseOperation(await request("GET", `/v2/operations/${id}`)),
+  status: async () =>
+    parseVersioned<HostStatus>("status", await request("GET", "/v2/status"), (body) => typeof body.server_version === "string"),
+  settings: async () => parseSettings(await request("GET", "/v2/settings")),
+  updateSettings: async (patch: SettingsPatch) => parseSettings(await request("PATCH", "/v2/settings", patch)),
+  discovery: async () =>
+    parseVersioned<Discovery>("discovery status", await request("GET", "/v2/discovery"), (body) => Array.isArray(body.scans)),
+  discover: async () => parseOperation(await request("POST", "/v2/discovery", {})),
+  sharing: async () =>
+    parseVersioned<Sharing>("sharing status", await request("GET", "/v2/sharing"), (body) => Array.isArray(body.endpoints)),
+  updateSharing: async (body: SharingUpdate) =>
+    parseVersioned<Sharing>("sharing status", await request("PUT", "/v2/sharing", body), (body) => Array.isArray(body.endpoints)),
+  clients: async () =>
+    parseVersioned<{ clients: Client[] }>("device list", await request("GET", "/v2/clients"), (body) => Array.isArray(body.clients))
+      .clients,
+  createClient: async (label: string) =>
+    parseVersioned<ClientCreated>(
+      "device credential",
+      await request("POST", "/v2/clients", { label, scope: "read" }),
+      (body) => typeof body.token === "string" && typeof body.host_id === "string" && isRecord(body.client),
+    ),
+  revokeClient: async (id: string) => {
+    await request("DELETE", `/v2/clients/${id}`);
+  },
 };
