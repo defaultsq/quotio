@@ -1,0 +1,41 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, type Operation, type RefreshRequest } from "@/lib/api/client";
+import { projectAccounts } from "./model";
+
+// Snapshot reads never fetch provider quota, so polling is cheap; the host schedules refreshes.
+const SNAPSHOT_POLL_MS = 15_000;
+const OPERATION_POLL_MS = 750;
+const OPERATION_DEADLINE_MS = 90_000;
+
+const keys = { snapshot: ["snapshot"], providers: ["providers"] } as const;
+
+export function useAccountsView() {
+  const snapshot = useQuery({ queryKey: keys.snapshot, queryFn: api.snapshot, refetchInterval: SNAPSHOT_POLL_MS });
+  const providers = useQuery({ queryKey: keys.providers, queryFn: api.providers, staleTime: Infinity });
+  const view = snapshot.data && providers.data ? projectAccounts(snapshot.data, providers.data) : undefined;
+  return {
+    view,
+    error: snapshot.error ?? providers.error,
+    isPending: snapshot.isPending || providers.isPending,
+    retry: () => Promise.all([snapshot.refetch(), providers.refetch()]),
+  };
+}
+
+/** Starts a refresh, waits for its operation to finish, then re-reads the snapshot. */
+export function useRefresh() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (request: RefreshRequest) => settle(await api.refresh(request)),
+    onSettled: () => client.invalidateQueries({ queryKey: keys.snapshot }),
+  });
+}
+
+async function settle(operation: Operation): Promise<Operation> {
+  const deadline = Date.now() + OPERATION_DEADLINE_MS;
+  let current = operation;
+  while (current.status === "running" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, OPERATION_POLL_MS));
+    current = await api.operation(current.id);
+  }
+  return current;
+}

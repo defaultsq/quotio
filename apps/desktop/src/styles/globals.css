@@ -1,0 +1,147 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* The app follows the system appearance; Tauri's window theme drives this media query. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+/* Design tokens from the Wonder export (tokens.json), names unchanged. */
+:root {
+  --bg-white-0: #ffffff;
+  --bg-weak-50: #f7f7f7;
+  --stroke-soft-200: #ebebeb;
+  --text-strong-950: #171717;
+  --text-sub-600: #5c5c5c;
+  --text-soft-400: #a3a3a3;
+  --text-disabled-300: #d1d1d1;
+  --primary-base: #1daf61;
+  --primary-base-2: #335cff;
+  --alpha-primary-alpha-10: #1fc16b1a;
+  --alpha-red-alpha-10: #fb37481a;
+  --state-error-base: #fb3748;
+  --state-away-base: #f6b51e;
+  --state-stable-base: #22d3bb;
+  --state-feature-base: #7d52f4;
+  --state-feature-lighter: #efebff;
+  --state-faded-base: #7b7b7b;
+  --state-faded-lighter: #f5f5f5;
+  --state-success-dark: #0b4627;
+  --state-success-light: #c2f5da;
+
+  --shadow-raised: 0px 1px 2px rgba(23, 23, 23, 0.06), 0px 0px 0px 1px rgba(23, 23, 23, 0.06);
+  --shadow-button: 0px 1px 2px rgba(23, 23, 23, 0.06), 0px 0px 0px 1px rgba(23, 23, 23, 0.1);
+  --shadow-card: 0px 3px 3px -1.5px rgba(23, 23, 23, 0.04), 0px 1px 1px -0.5px rgba(23, 23, 23, 0.04),
+    0px 0px 0px 1px rgba(23, 23, 23, 0.08);
+
+  /* shadcn semantic variables, expressed in design tokens. */
+  --radius: 10px;
+  --background: var(--bg-white-0);
+  --foreground: var(--text-strong-950);
+  --card: var(--bg-white-0);
+  --card-foreground: var(--text-strong-950);
+  --popover: var(--bg-white-0);
+  --popover-foreground: var(--text-strong-950);
+  --primary: var(--primary-base);
+  --primary-foreground: #ffffff;
+  --secondary: var(--bg-weak-50);
+  --secondary-foreground: var(--text-strong-950);
+  --muted: var(--bg-weak-50);
+  --muted-foreground: var(--text-sub-600);
+  --accent: var(--bg-weak-50);
+  --accent-foreground: var(--text-strong-950);
+  --destructive: var(--state-error-base);
+  --border: var(--stroke-soft-200);
+  --input: var(--stroke-soft-200);
+  --ring: var(--primary-base);
+}
+
+/* Dark: the neutral scale inverts, hues stay. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg-white-0: #1c1c1c;
+    --bg-weak-50: #111111;
+    --stroke-soft-200: #2e2e2e;
+    --text-strong-950: #f7f7f7;
+    --text-sub-600: #a3a3a3;
+    --text-soft-400: #7b7b7b;
+    --text-disabled-300: #474747;
+    --state-feature-lighter: #7d52f429;
+    --state-faded-base: #a3a3a3;
+    --state-faded-lighter: #262626;
+    --state-success-dark: #c2f5da;
+    --state-success-light: #1daf6133;
+    --alpha-red-alpha-10: #fb374829;
+
+    --shadow-raised: 0px 1px 2px rgba(0, 0, 0, 0.3), 0px 0px 0px 1px rgba(255, 255, 255, 0.08);
+    --shadow-button: 0px 1px 2px rgba(0, 0, 0, 0.3), 0px 0px 0px 1px rgba(255, 255, 255, 0.1);
+    --shadow-card: 0px 3px 3px -1.5px rgba(0, 0, 0, 0.2), 0px 1px 1px -0.5px rgba(0, 0, 0, 0.2),
+      0px 0px 0px 1px rgba(255, 255, 255, 0.08);
+  }
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-bg-white-0: var(--bg-white-0);
+  --color-bg-weak-50: var(--bg-weak-50);
+  --color-stroke-soft-200: var(--stroke-soft-200);
+  --color-text-strong-950: var(--text-strong-950);
+  --color-text-sub-600: var(--text-sub-600);
+  --color-text-soft-400: var(--text-soft-400);
+  --color-text-disabled-300: var(--text-disabled-300);
+  --color-primary-base: var(--primary-base);
+  --color-primary-base-2: var(--primary-base-2);
+  --color-alpha-primary-10: var(--alpha-primary-alpha-10);
+  --color-alpha-red-10: var(--alpha-red-alpha-10);
+  --color-state-error: var(--state-error-base);
+  --color-state-away: var(--state-away-base);
+  --color-state-stable: var(--state-stable-base);
+  --color-state-feature: var(--state-feature-base);
+  --color-state-faded: var(--state-faded-base);
+
+  --shadow-raised: var(--shadow-raised);
+  --shadow-button: var(--shadow-button);
+  --shadow-card: var(--shadow-card);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg-weak-50 text-text-strong-950 font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}
