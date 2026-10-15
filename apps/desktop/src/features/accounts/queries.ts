@@ -1,7 +1,8 @@
 import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { platform } from "@tauri-apps/plugin-os";
 import { api, ApiError, type Operation, type ProviderId, type RefreshRequest, type SourceInput } from "@/lib/api/client";
-import { projectAccounts } from "./model";
+import { nativeKinds, projectAccounts, projectFoundLogins, type Inspection } from "./model";
 
 // Snapshot reads never fetch provider quota, so polling is cheap; the host schedules refreshes.
 const SNAPSHOT_POLL_MS = 15_000;
@@ -9,7 +10,13 @@ const OPERATION_POLL_MS = 750;
 const OPERATION_DEADLINE_MS = 90_000;
 
 // The status key is shared with the Settings pages so one invalidation reaches both.
-const keys = { snapshot: ["snapshot"], providers: ["providers"], status: ["status"], discovery: ["discovery"] } as const;
+const keys = {
+  snapshot: ["snapshot"],
+  providers: ["providers"],
+  status: ["status"],
+  discovery: ["discovery"],
+  inspection: ["login-inspection"],
+} as const;
 
 export function useAccountsView() {
   const snapshot = useQuery({ queryKey: keys.snapshot, queryFn: api.snapshot, refetchInterval: SNAPSHOT_POLL_MS });
@@ -83,6 +90,44 @@ export function useAddSource() {
       return operation;
     },
     onSettled: () => client.invalidateQueries({ queryKey: keys.snapshot }),
+  });
+}
+
+/** Logins on this computer, each marked when an account already reads it; null until both have loaded. */
+export function useFoundLogins() {
+  const { view } = useAccountsView();
+  const inspections = useInspections();
+  const found = useMemo(
+    () => (view && inspections.data ? projectFoundLogins(view, inspections.data) : null),
+    [view, inspections.data],
+  );
+  return { found, inspections };
+}
+
+/**
+ * Looks for logins on this computer without registering them. One inspection at a time:
+ * the host inspects under a lock and answers a concurrent one with `busy`.
+ */
+function useInspections() {
+  return useQuery({
+    queryKey: keys.inspection,
+    staleTime: 0,
+    queryFn: async () => {
+      const os = platform();
+      if (os !== "macos" && os !== "linux" && os !== "windows") return [];
+      const inspections: Inspection[] = [];
+      for (const provider of await api.providers()) {
+        for (const kind of nativeKinds(provider, os)) {
+          try {
+            inspections.push({ provider: provider.id, result: await api.inspectSources(provider.id, kind) });
+          } catch (error) {
+            // One unreadable tool should not hide what the others found.
+            console.warn(`Inspecting ${provider.id} ${kind} failed`, error);
+          }
+        }
+      }
+      return inspections;
+    },
   });
 }
 

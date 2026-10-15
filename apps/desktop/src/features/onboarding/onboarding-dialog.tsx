@@ -1,11 +1,8 @@
-import { Fragment, useRef, useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import {
   RiCheckLine,
-  RiCheckboxCircleFill,
-  RiErrorWarningLine,
   RiNotification3Line,
   RiPieChart2Line,
-  RiRefreshLine,
   RiShieldCheckLine,
   RiLayoutBottomLine,
   type RemixiconComponentType,
@@ -14,13 +11,10 @@ import { platform } from "@tauri-apps/plugin-os";
 import { ProviderLogo } from "@/components/provider-logo";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
-import type { ProviderView } from "@/features/accounts/model";
-import { useAccountsView, useAddSource, useScan } from "@/features/accounts/queries";
+import { FoundLogins } from "@/features/accounts/found-logins";
+import { useAccountsView, useFoundLogins } from "@/features/accounts/queries";
 import { updatePreferences, usePreferences } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
-import { projectConnect, type FoundLogin, type FoundProvider } from "./model";
-import { useInspections } from "./queries";
 
 const steps = [
   { id: "welcome", label: "Welcome" },
@@ -145,11 +139,8 @@ function Welcome({ onNext, onSkip }: { onNext: () => void; onSkip: () => void })
 
 function Connect({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
   const { view } = useAccountsView();
-  const inspections = useInspections(true);
-  const scan = useScan();
-  const connect = view && inspections.data ? projectConnect(view, inspections.data) : null;
-  const ready = connect?.found.filter((row) => row.status === "connected").length ?? 0;
-  const rescan = () => scan.mutate({}, { onSettled: () => void inspections.refetch() });
+  const { found: connect } = useFoundLogins();
+  const ready = view?.accountCount ?? 0;
 
   return (
     <>
@@ -163,34 +154,7 @@ function Connect({ onBack, onNext }: { onBack: () => void; onNext: () => void })
         }
         subtitle="Quotio reads logins your CLIs already use. Nothing is uploaded."
       >
-        <div className="flex flex-col rounded-2xl border border-stroke-soft-200">
-          {!connect ? (
-            <div aria-busy className="flex flex-col gap-3 p-4">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-            </div>
-          ) : connect.found.length === 0 ? (
-            <p className="px-4 py-6 text-center text-sm text-text-sub-600">
-              Sign in to Claude Code, Codex or another supported tool, then scan again.
-            </p>
-          ) : (
-            connect.found.map((row) => <FoundRows key={row.provider.id} row={row} onRescan={() => void inspections.refetch()} />)
-          )}
-          <div className="flex items-center gap-1.5 rounded-b-2xl border-t border-stroke-soft-200 bg-bg-weak-50 px-4 py-2.5 text-xs leading-4 text-text-sub-600">
-            <span className="flex-1">
-              {scan.error ? `The scan failed. ${scan.error.message}` : "Missing one? Sign in to its CLI, then scan again."}
-            </span>
-            <button
-              type="button"
-              disabled={scan.isPending || inspections.isFetching}
-              onClick={rescan}
-              className="flex cursor-pointer items-center gap-1 font-medium text-text-strong-950 disabled:opacity-50"
-            >
-              <RiRefreshLine className={cn("size-3.5", (scan.isPending || inspections.isFetching) && "animate-spin")} />
-              Scan again
-            </button>
-          </div>
-        </div>
+        <FoundLogins />
         {connect && connect.others.length > 0 && (
           <div className="flex flex-col gap-2.5">
             <span className="text-xs leading-4 font-medium text-text-soft-400">Also supported, once you sign in to their tool</span>
@@ -216,69 +180,6 @@ function Connect({ onBack, onNext }: { onBack: () => void; onNext: () => void })
         </Button>
       </Footer>
     </>
-  );
-}
-
-function FoundRows({ row, onRescan }: { row: FoundProvider; onRescan: () => void }) {
-  if (row.status === "found") {
-    return row.logins.map((login) => (
-      <LoginRow key={JSON.stringify(login.source)} provider={row.provider} login={login} onAdded={onRescan} />
-    ));
-  }
-  return (
-    <ProviderRow provider={row.provider} detail={row.detail}>
-      {row.status === "connected" ? (
-        <span className="flex items-center gap-1 text-xs leading-4 font-medium text-state-stable">
-          <RiCheckboxCircleFill className="size-3.5" />
-          Ready
-        </span>
-      ) : (
-        <span className="flex items-center gap-1 rounded-full bg-alpha-away-10 px-2 py-0.5 text-xs leading-4 font-medium text-state-away">
-          <RiErrorWarningLine className="size-3.5" />
-          Needs access
-        </span>
-      )}
-    </ProviderRow>
-  );
-}
-
-function LoginRow({ provider, login, onAdded }: { provider: ProviderView; login: FoundLogin; onAdded: () => void }) {
-  const add = useAddSource();
-  // One key per attempt to add this login, so a retry after a lost response registers it once.
-  const idempotencyKey = useRef<string | null>(null);
-  const submit = () => {
-    idempotencyKey.current ??= crypto.randomUUID();
-    add.mutate(
-      { source: login.source, idempotencyKey: idempotencyKey.current },
-      {
-        onSuccess: () => {
-          idempotencyKey.current = null;
-          onAdded();
-        },
-      },
-    );
-  };
-  return (
-    <ProviderRow provider={provider} detail={add.error ? `Couldn’t add it. ${add.error.message}` : login.label}>
-      <Button variant="raised" size="sm" disabled={add.isPending} onClick={submit}>
-        {add.isPending ? "Adding…" : "Add"}
-      </Button>
-    </ProviderRow>
-  );
-}
-
-function ProviderRow({ provider, detail, children }: { provider: ProviderView; detail: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center gap-3 border-b border-stroke-soft-200 px-4 py-3 last:border-b-0">
-      <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-bg-weak-50">
-        <ProviderLogo provider={provider} className="size-4" />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-sm leading-5 font-medium text-text-strong-950">{provider.name}</span>
-        <span className="truncate text-xs leading-4 text-text-sub-600">{detail}</span>
-      </span>
-      {children}
-    </div>
   );
 }
 

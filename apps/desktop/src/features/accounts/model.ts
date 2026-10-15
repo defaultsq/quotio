@@ -10,6 +10,9 @@ import type {
   ProviderId,
   RefreshRequest,
   Snapshot,
+  SourceInput,
+  SourceInspection,
+  SourceKind,
   Usage,
 } from "@/lib/api/client";
 
@@ -156,6 +159,78 @@ export function filterGroups(groups: ProviderGroup[], query: string): ProviderGr
     });
     return accounts.length > 0 ? [{ ...group, accounts }] : [];
   });
+}
+
+export type Inspection = { provider: ProviderId; result: SourceInspection };
+
+/** One login an inspection found; `source` registers exactly that login. */
+export type FoundLogin = {
+  label: string;
+  source: SourceInput;
+  /** A source of the provider's accounts already reads this login. */
+  added: boolean;
+};
+
+/** One provider: logins found to add one at a time, connected with nothing found, or found but locked. */
+export type FoundProvider =
+  | { provider: ProviderView; status: "connected" | "needs_access"; detail: string }
+  | { provider: ProviderView; status: "found"; logins: FoundLogin[] };
+
+export type FoundView = { found: FoundProvider[]; others: ProviderView[] };
+
+type Platform = "macos" | "linux" | "windows";
+
+/** Login kinds the host can look for on this OS; a provider without any has nothing to find. */
+export function nativeKinds(provider: Provider, platform: Platform): SourceKind[] {
+  return (provider.capabilities.source_references ?? []).flatMap((source) =>
+    source.origin === "borrowed_native" &&
+    source.kind !== "quotio_custom_provider" &&
+    source.kind !== "cli_proxy_auth_file" &&
+    (source.platforms as string[]).includes(platform)
+      ? [source.kind]
+      : [],
+  );
+}
+
+/** Projects what the host knows and what it found on this computer onto per-provider rows. */
+export function projectFoundLogins(view: AccountsView, inspections: readonly Inspection[]): FoundView {
+  const groups = new Map(view.groups.map((group) => [group.provider.id, group]));
+  const found: FoundProvider[] = [];
+  for (const provider of [...view.groups.map((group) => group.provider), ...view.unconnected]) {
+    const accounts = groups.get(provider.id)?.accounts ?? [];
+    const sources = accounts.flatMap((account) => account.account.sources);
+    const candidates = inspections.filter((inspection) => inspection.provider === provider.id).flatMap((inspection) => inspection.result.candidates);
+    // The host also reports `permission_required`, which the generated enum omits.
+    const status = (candidate: (typeof candidates)[number]) => candidate.status as string;
+    const available = candidates.filter((candidate) => status(candidate) === "available");
+    if (available.length > 0) {
+      const repeated = (label: string) => available.filter((candidate) => candidate.label === label).length > 1;
+      // The host labels file logins generically, so its location tells two of them apart.
+      const logins = available.map(({ label, source }) => ({
+        label: repeated(label) && "location" in source && source.location ? `${label} (${source.location})` : label,
+        source,
+        added: sources.some((registered) => readsLogin(registered, source)),
+      }));
+      found.push({ provider, status: "found", logins });
+    } else if (accounts.length > 0) {
+      found.push({ provider, status: "connected", detail: accounts.length === 1 ? "1 account" : `${accounts.length} accounts` });
+    } else if (candidates.some((candidate) => status(candidate) === "permission_required")) {
+      found.push({ provider, status: "needs_access", detail: "Found, but your system hasn’t let Quotio read it." });
+    }
+  }
+  const listed = new Set(found.map((row) => row.provider.id));
+  return { found, others: view.unconnected.filter((provider) => !listed.has(provider.id)) };
+}
+
+// A registered source names its kind, semantic location and config directory in the terms a found
+// login uses. A `discovered` reference is opaque, so only the host can tell it is a duplicate.
+function readsLogin(source: Account["sources"][number], login: SourceInput): boolean {
+  if (login.kind === "discovered" || source.kind !== login.kind) return false;
+  const directory = "config_dir" in login ? login.config_dir : undefined;
+  if ((source.directory ?? null) !== (directory ?? null)) return false;
+  const location = "location" in login ? login.location : undefined;
+  // The host omits the location of kinds it keeps no location code for, such as Codex.
+  return source.location === null || location === undefined || source.location === location;
 }
 
 function providerView(provider: Provider): ProviderView {
