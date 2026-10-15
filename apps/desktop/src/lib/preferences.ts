@@ -40,13 +40,15 @@ export type Preferences = {
     hiddenProviders: string[];
     percentInTooltip: boolean;
   };
+  /** The optional CLIProxyAPI server the host runs; its installed versions live in the host. */
+  proxy: { port: number; startWithQuotio: boolean };
   /** False until the welcome guide is finished or dismissed. */
   onboarded: boolean;
   /** Alert keys already notified (see features/alerts/model.ts), so a restart does not repeat them. */
   notifiedAlerts: string[];
 };
 
-const VERSION = 2;
+const VERSION = 3;
 const FILE = "preferences.json";
 const KEY = "preferences";
 
@@ -61,6 +63,7 @@ export const defaultPreferences: Preferences = {
     modes: { local_network: { enabled: false, address: null }, tailscale: { enabled: false, address: null } },
   },
   tray: { density: "comfortable", hiddenProviders: [], percentInTooltip: true },
+  proxy: { port: 8317, startWithQuotio: true },
   onboarded: false,
   notifiedAlerts: [],
 };
@@ -115,7 +118,8 @@ export function updatePreferences(update: (preferences: Preferences) => Preferen
 }
 
 function parsePreferences(raw: unknown): Preferences {
-  if (!isRecord(raw) || (raw.version !== 1 && raw.version !== VERSION)) return defaultPreferences;
+  // Versions 1 and 2 predate `proxy`, which falls back to its defaults below.
+  if (!isRecord(raw) || (raw.version !== 1 && raw.version !== 2 && raw.version !== VERSION)) return defaultPreferences;
   const fallback = defaultPreferences;
   // Version 1 predates the welcome guide; anyone upgrading from it has already set Quotio up.
   const onboarded = raw.version === 1 ? true : boolean(raw.onboarded, fallback.onboarded);
@@ -131,6 +135,7 @@ function parsePreferences(raw: unknown): Preferences {
     };
   };
   const port = sharing.port;
+  const proxy = isRecord(raw.proxy) ? raw.proxy : {};
   return {
     theme: oneOf(themes, raw.theme, fallback.theme),
     launchAtLogin: boolean(raw.launchAtLogin, fallback.launchAtLogin),
@@ -151,6 +156,10 @@ function parsePreferences(raw: unknown): Preferences {
       density: oneOf(trayDensities, tray.density, fallback.tray.density),
       hiddenProviders: strings(tray.hiddenProviders),
       percentInTooltip: boolean(tray.percentInTooltip, fallback.tray.percentInTooltip),
+    },
+    proxy: {
+      port: isPort(proxy.port) ? proxy.port : fallback.proxy.port,
+      startWithQuotio: boolean(proxy.startWithQuotio, fallback.proxy.startWithQuotio),
     },
     onboarded,
     notifiedAlerts: strings(raw.notifiedAlerts),
