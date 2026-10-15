@@ -33,7 +33,7 @@
     "category": "Utility",
     "shortDescription": "Track AI coding assistant quotas",
     "longDescription": "Quotio shows quota and usage for your AI coding assistant accounts in a window and the system tray.",
-    "externalBin": ["binaries/quotio"],
+    "externalBin": ["binaries/quotio-cli"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

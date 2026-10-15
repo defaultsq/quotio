@@ -14,7 +14,7 @@ Run these commands from `apps/desktop`:
 
 ```sh
 pnpm install
-pnpm sidecar        # builds apps/cli and stages src-tauri/binaries/quotio-<target-triple>
+pnpm sidecar        # builds apps/cli and stages src-tauri/binaries/quotio-cli-<target-triple>
 pnpm tauri dev
 ```
 
@@ -28,13 +28,13 @@ cargo check --manifest-path src-tauri/Cargo.toml
 pnpm sidecar --release && pnpm tauri build
 ```
 
-`pnpm sidecar` builds for the host target. Pass `--target <triple>` to stage a sidecar for another target, for example `x86_64-pc-windows-msvc`, which produces `src-tauri/binaries/quotio-x86_64-pc-windows-msvc.exe`.
+`pnpm sidecar` builds for the host target. Pass `--target <triple>` to stage a sidecar for another target, for example `x86_64-pc-windows-msvc`, which produces `src-tauri/binaries/quotio-cli-x86_64-pc-windows-msvc.exe`.
 
 ## Package and release
 
 `pnpm tauri build` writes installers to `src-tauri/target/release/bundle/`:
 
-- Linux: `deb`, `rpm`, and `appimage`. The deb depends on WebKitGTK 4.1, GTK 3, Ayatana AppIndicator, and libdbus, and recommends `gnome-keyring | kwallet6` for the [vault key](#linux-vault-key). The deb and rpm install the app as `/usr/bin/quotio-desktop` and the CLI sidecar as `/usr/bin/quotio`.
+- Linux: `deb`, `rpm`, and `appimage`. The deb depends on WebKitGTK 4.1, GTK 3, Ayatana AppIndicator, and libdbus, and recommends `gnome-keyring | kwallet6` for the [vault key](#linux-vault-key). The deb and rpm install the app as `/usr/bin/quotio-desktop` and the CLI sidecar as `/usr/bin/quotio-cli`, so it does not clash with a separately installed `quotio` CLI.
 - Windows: `nsis` (a per-user installer that downloads WebView2 when it is missing) and `msi`. CI builds only `nsis`, because MSI rejects prerelease versions such as `0.2.0-beta.1`.
 
 The **Desktop CI** workflow (`.github/workflows/desktop-ci.yml`) runs on changes to `apps/desktop` or `apps/cli`. On Ubuntu 24.04 and Windows Server 2025 it checks that `src/lib/api/schema.d.ts` matches `pnpm gen:api`, typechecks and builds the frontend, runs Clippy on `src-tauri`, and uploads the installers as workflow artifacts for 3 days.
@@ -67,7 +67,7 @@ On Linux the updater can replace only the AppImage. The deb and rpm update throu
 
 ## Architecture
 
-- The backend is the Quotio CLI, bundled as a sidecar (`bundle.externalBin`) and started as `quotio serve --manage --parent-pipe` with its own vault namespace, `quotio-desktop`.
+- The backend is the Quotio CLI, bundled as a sidecar (`bundle.externalBin`) and started as `quotio-cli serve --manage --parent-pipe` with its own vault namespace, `quotio-desktop`.
 - `src-tauri/src/sidecar.rs` owns the child process. It writes the bootstrap token to stdin, reads the bound port from stdout, and closes stdin on exit to stop the server. If the child exits after startup, the app starts a new one with a new token. Restarts wait 1 s, then 2 s, 4 s, and so on up to 30 s. The wait goes back to 1 s after the child stays up for 60 s. Requests wait while the child restarts.
 - The webview calls one Tauri command, `api(method, path, body, idempotencyKey)`, which proxies `/v2/*` requests with the bearer token and, for mutations that need one, the `Idempotency-Key` header. The token never reaches the webview.
 - `src/lib/api` holds the generated OpenAPI types and the typed client. `src/features/accounts/model.ts` projects the snapshot into the view model that components render.

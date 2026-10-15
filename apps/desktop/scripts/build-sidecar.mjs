@@ -1,5 +1,5 @@
 // Builds the Quotio CLI and stages it where Tauri's `bundle.externalBin` expects it:
-// src-tauri/binaries/quotio-<target-triple>[.exe].
+// src-tauri/binaries/quotio-cli-<target-triple>[.exe].
 // Usage: node scripts/build-sidecar.mjs [--release] [--target <triple>]
 import { execFileSync } from "node:child_process";
 import { copyFileSync, chmodSync, mkdirSync } from "node:fs";
@@ -22,7 +22,7 @@ execFileSync("cargo", cargoArgs, { stdio: "inherit" });
 
 const extension = target.includes("windows") ? ".exe" : "";
 const built = resolve(root, "../cli/target", target, release ? "release" : "debug", `quotio${extension}`);
-const staged = join(root, "src-tauri/binaries", `quotio-${target}${extension}`);
+const staged = join(root, "src-tauri/binaries", `quotio-cli-${target}${extension}`);
 mkdirSync(dirname(staged), { recursive: true });
 copyFileSync(built, staged);
 chmodSync(staged, 0o755);

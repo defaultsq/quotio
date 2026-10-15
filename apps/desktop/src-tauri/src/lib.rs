@@ -32,7 +32,7 @@ pub fn run() {
         .setup(|app| {
             // `bundle.externalBin` places the CLI next to the app executable, in dev and release.
             let binary = std::env::current_exe()?
-                .with_file_name(format!("quotio{}", std::env::consts::EXE_SUFFIX));
+                .with_file_name(format!("quotio-cli{}", std::env::consts::EXE_SUFFIX));
             let data_dir = app.path().app_data_dir()?;
             app.manage(Sidecar::start(binary, data_dir));
             app.manage(Proxy::new(app.handle())?);

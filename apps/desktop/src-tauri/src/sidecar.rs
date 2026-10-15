@@ -1,4 +1,4 @@
-//! Owns the `quotio serve --parent-pipe` child: spawn, bootstrap, proxy, restart, stop.
+//! Owns the `quotio-cli serve --parent-pipe` child: spawn, bootstrap, proxy, restart, stop.
 //!
 //! The protocol mirrors the macOS app (QuotioCLIServerProcess.swift): write a
 //! `{"token": ...}` line to the child's stdin, read one bootstrap JSON line from
