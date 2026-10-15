@@ -32,9 +32,12 @@ export type SourceInspection = Schemas["SourceDiscoveryResult"];
 export type SourceInput = Schemas["AccountSourceInput"];
 export type ClientCreated = Schemas["ClientCreated"];
 
+/** The log that holds the CLI's stderr, and the last lines the CLI wrote to it. */
+export type StderrLog = { path: string; tail: string[] };
+
 /** Why a request failed, as the UI needs to tell the cases apart. */
 export type ApiFailure =
-  | { kind: "sidecar_unavailable"; message: string }
+  | { kind: "sidecar_unavailable"; message: string; stderr: StderrLog | null }
   | { kind: "transport"; message: string }
   | { kind: "invalid_request"; message: string }
   | { kind: "http"; status: number; code: string }
@@ -66,14 +69,20 @@ async function request(method: Method, path: `/v2/${string}`, body?: unknown, id
 }
 
 function parseCommandError(error: unknown): ApiFailure {
-  if (
-    isRecord(error) &&
-    (error.kind === "sidecar_unavailable" || error.kind === "transport" || error.kind === "invalid_request") &&
-    typeof error.message === "string"
-  ) {
-    return { kind: error.kind, message: error.message };
+  if (isRecord(error) && typeof error.message === "string") {
+    if (error.kind === "sidecar_unavailable") {
+      return { kind: error.kind, message: error.message, stderr: parseStderrLog(error.stderr) };
+    }
+    if (error.kind === "transport" || error.kind === "invalid_request") {
+      return { kind: error.kind, message: error.message };
+    }
   }
   return { kind: "transport", message: String(error) };
+}
+
+function parseStderrLog(value: unknown): StderrLog | null {
+  if (!isRecord(value) || typeof value.path !== "string" || !Array.isArray(value.tail)) return null;
+  return { path: value.path, tail: value.tail.filter((line): line is string => typeof line === "string") };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -224,13 +224,23 @@ function EmptyState({ blocked, onAdd }: { blocked: string | null; onAdd: () => v
 }
 
 function LoadError({ error, onRetry }: { error: Error; onRetry: () => void }) {
-  const sidecar = error instanceof ApiError && error.failure.kind === "sidecar_unavailable";
+  const sidecar = error instanceof ApiError && error.failure.kind === "sidecar_unavailable" ? error.failure : null;
   return (
     <div className="flex flex-col items-center gap-3 rounded-2xl bg-alpha-red-10 px-6 py-12 text-center">
       <h2 className="text-sm font-medium text-text-strong-950">
         {sidecar ? "Quotio’s background service didn’t start" : "Couldn’t load accounts"}
       </h2>
       <p className="max-w-md text-sm text-text-sub-600">{error.message}</p>
+      {sidecar?.stderr && (
+        <>
+          {sidecar.stderr.tail.length > 0 && (
+            <pre className="w-full max-w-xl overflow-x-auto rounded-lg bg-bg-white-0 p-3 text-left font-mono text-xs text-text-sub-600">
+              {sidecar.stderr.tail.join("\n")}
+            </pre>
+          )}
+          <p className="max-w-xl text-xs break-all text-text-soft-400">Full log: {sidecar.stderr.path}</p>
+        </>
+      )}
       {sidecar ? (
         <p className="text-xs text-text-soft-400">Quit and reopen Quotio to try again.</p>
       ) : (

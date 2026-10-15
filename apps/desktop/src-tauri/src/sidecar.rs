@@ -25,12 +25,35 @@ const HEALTHY_RUN: Duration = Duration::from_secs(60);
 const VAULT_KEY_WAIT: Duration = Duration::from_secs(15);
 const VAULT_NAMESPACE: &str = "quotio-desktop";
 const DEFAULT_REFRESH_SECONDS: u64 = 300;
+const STDERR_LOG: &str = "quotio-cli.log";
+const PREVIOUS_STDERR_LOG: &str = "quotio-cli.old.log";
+const STDERR_TAIL_LINES: usize = 10;
 
 #[derive(Clone)]
 enum Status {
     Starting,
     Ready { base_url: String, token: String },
-    Failed(String),
+    Failed(StartupFailure),
+}
+
+/// Why the CLI did not start. `stderr` is set when the CLI ran with its stderr in the log.
+#[derive(Clone, Serialize, Debug)]
+pub struct StartupFailure {
+    message: String,
+    stderr: Option<StderrLog>,
+}
+
+/// The log that holds the CLI's stderr, and the last lines the CLI wrote to it.
+#[derive(Clone, Serialize, Debug)]
+pub struct StderrLog {
+    path: PathBuf,
+    tail: Vec<String>,
+}
+
+impl From<String> for StartupFailure {
+    fn from(message: String) -> Self {
+        Self { message, stderr: None }
+    }
 }
 
 type VaultKey = [u8; 32];
@@ -126,11 +149,11 @@ pub struct ApiResponse {
 /// Errors the webview can distinguish. HTTP error statuses are not errors here;
 /// they arrive as an `ApiResponse` with the server's body.
 #[derive(Serialize, Debug)]
-#[serde(tag = "kind", content = "message", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ApiError {
-    InvalidRequest(String),
-    SidecarUnavailable(String),
-    Transport(String),
+    InvalidRequest { message: String },
+    SidecarUnavailable(StartupFailure),
+    Transport { message: String },
 }
 
 #[derive(Deserialize)]
@@ -144,7 +167,7 @@ struct Bootstrap {
 
 impl Sidecar {
     /// Starts the child on a background thread; requests wait until it is ready or failed.
-    pub fn start(binary: PathBuf, data_dir: PathBuf) -> Arc<Self> {
+    pub fn start(binary: PathBuf, data_dir: PathBuf, log_dir: PathBuf) -> Arc<Self> {
         let (sender, status) = watch::channel(Status::Starting);
         let sidecar = Arc::new(Self {
             status,
@@ -157,7 +180,7 @@ impl Sidecar {
                 .expect("HTTP client"),
         });
         let owner = sidecar.clone();
-        std::thread::spawn(move || owner.supervise(&binary, &data_dir, &sender));
+        std::thread::spawn(move || owner.supervise(&binary, &data_dir, &log_dir, &sender));
         sidecar
     }
 
@@ -165,13 +188,19 @@ impl Sidecar {
     /// it was ready. A failed first launch is final: retrying a missing or
     /// incompatible binary cannot help. A vault key that arrives after a keyless
     /// launch restarts the child once, without backoff.
-    fn supervise(&self, binary: &Path, data_dir: &Path, sender: &watch::Sender<Status>) {
+    fn supervise(
+        &self,
+        binary: &Path,
+        data_dir: &Path,
+        log_dir: &Path,
+        sender: &watch::Sender<Status>,
+    ) {
         let mut vault_key = KeyState::fetch();
         let mut was_ready = false;
         let mut backoff = MIN_BACKOFF;
         loop {
             sender.send_replace(Status::Starting);
-            match launch(binary, data_dir, vault_key.key()) {
+            match launch(binary, data_dir, log_dir, vault_key.key()) {
                 Ok((running, base_url, token)) => {
                     {
                         let mut slot = self.running.lock().unwrap();
@@ -200,9 +229,9 @@ impl Sidecar {
                         backoff = MIN_BACKOFF;
                     }
                 }
-                Err(message) => {
-                    eprintln!("quotio-desktop: cannot start the Quotio CLI: {message}");
-                    sender.send_replace(Status::Failed(message));
+                Err(failure) => {
+                    eprintln!("quotio-desktop: cannot start the Quotio CLI: {}", failure.message);
+                    sender.send_replace(Status::Failed(failure));
                     if !was_ready {
                         return;
                     }
@@ -258,7 +287,11 @@ impl Sidecar {
             "PATCH" => reqwest::Method::PATCH,
             "PUT" => reqwest::Method::PUT,
             "DELETE" => reqwest::Method::DELETE,
-            other => return Err(ApiError::InvalidRequest(format!("unsupported method {other}"))),
+            other => {
+                return Err(ApiError::InvalidRequest {
+                    message: format!("unsupported method {other}"),
+                })
+            }
         };
         validate_path(path)?;
         if let Some(key) = idempotency_key {
@@ -278,12 +311,16 @@ impl Sidecar {
         let response = request
             .send()
             .await
-            .map_err(|error| ApiError::Transport(error.without_url().to_string()))?;
+            .map_err(|error| ApiError::Transport {
+                message: error.without_url().to_string(),
+            })?;
         let status = response.status().as_u16();
         let bytes = response
             .bytes()
             .await
-            .map_err(|error| ApiError::Transport(error.without_url().to_string()))?;
+            .map_err(|error| ApiError::Transport {
+                message: error.without_url().to_string(),
+            })?;
         let body = if bytes.is_empty() {
             serde_json::Value::Null
         } else {
@@ -299,11 +336,13 @@ impl Sidecar {
         let status = status
             .wait_for(|status| !matches!(status, Status::Starting))
             .await
-            .map_err(|_| ApiError::SidecarUnavailable("the sidecar never reported".into()))?
+            .map_err(|_| {
+                ApiError::SidecarUnavailable(String::from("the sidecar never reported").into())
+            })?
             .clone();
         match status {
             Status::Ready { base_url, token } => Ok((base_url, token)),
-            Status::Failed(message) => Err(ApiError::SidecarUnavailable(message)),
+            Status::Failed(failure) => Err(ApiError::SidecarUnavailable(failure)),
             Status::Starting => unreachable!("wait_for skips Starting"),
         }
     }
@@ -324,7 +363,9 @@ fn validate_path(path: &str) -> Result<(), ApiError> {
         || !path.chars().all(allowed)
         || path.split('/').any(|segment| segment == ".." || segment == ".")
     {
-        return Err(ApiError::InvalidRequest(format!("path {path} is not a /v2/ route")));
+        return Err(ApiError::InvalidRequest {
+            message: format!("path {path} is not a /v2/ route"),
+        });
     }
     Ok(())
 }
@@ -332,7 +373,9 @@ fn validate_path(path: &str) -> Result<(), ApiError> {
 /// The host's rule for account and source writes: 1–128 visible ASCII characters.
 fn validate_idempotency_key(key: &str) -> Result<(), ApiError> {
     if key.is_empty() || key.len() > 128 || !key.bytes().all(|byte| byte.is_ascii_graphic()) {
-        return Err(ApiError::InvalidRequest("the idempotency key is invalid".into()));
+        return Err(ApiError::InvalidRequest {
+            message: "the idempotency key is invalid".into(),
+        });
     }
     Ok(())
 }
@@ -340,10 +383,11 @@ fn validate_idempotency_key(key: &str) -> Result<(), ApiError> {
 fn launch(
     binary: &Path,
     data_dir: &Path,
+    log_dir: &Path,
     vault_key: Option<&VaultKey>,
-) -> Result<(Running, String, String), String> {
+) -> Result<(Running, String, String), StartupFailure> {
     if !binary.is_file() {
-        return Err(format!("Quotio CLI not found at {}", binary.display()));
+        return Err(format!("Quotio CLI not found at {}", binary.display()).into());
     }
     let accounts = data_dir.join("QuotioCLI");
     std::fs::create_dir_all(&accounts)
@@ -369,13 +413,22 @@ fn launch(
             .arg("--account-data-dir")
             .arg(&accounts);
     }
+    // Release builds keep the CLI's stderr in a log so a failed start can show why.
+    let stderr_log = (!cfg!(debug_assertions)).then(|| log_dir.join(STDERR_LOG));
+    let stderr = match &stderr_log {
+        Some(path) => Stdio::from(
+            rotate_stderr_log(log_dir)
+                .map_err(|error| format!("cannot create {}: {error}", path.display()))?,
+        ),
+        None => Stdio::inherit(),
+    };
     command
         .env_remove("QUOTIO_SERVER_TOKEN")
         .env_remove("QUOTIO_VAULT_KEY_FILE")
         .env_remove("QUOTIO_VAULT_KEY_FD")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(if cfg!(debug_assertions) { Stdio::inherit() } else { Stdio::null() });
+        .stderr(stderr);
     let key_pipe = pass_vault_key(&mut command, vault_key)
         .map_err(|error| format!("cannot pass the vault key: {error}"))?;
     let spawned = command.spawn();
@@ -407,7 +460,13 @@ fn launch(
             };
             let _ = child.kill();
             let _ = child.wait();
-            Err(message)
+            Err(StartupFailure {
+                message,
+                stderr: stderr_log.map(|path| StderrLog {
+                    tail: stderr_tail(&path),
+                    path,
+                }),
+            })
         }
     }
 }
@@ -445,6 +504,23 @@ fn handshake(child: &mut Child, token: &str) -> Result<Bootstrap, String> {
         Err(_) => return Err("the Quotio CLI did not start in time".into()),
     };
     serde_json::from_str(&line).map_err(|_| "the Quotio CLI sent an invalid bootstrap".into())
+}
+
+/// Keeps the previous CLI run's stderr as `PREVIOUS_STDERR_LOG` and opens an empty log.
+fn rotate_stderr_log(log_dir: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::create_dir_all(log_dir)?;
+    let _ = std::fs::rename(log_dir.join(STDERR_LOG), log_dir.join(PREVIOUS_STDERR_LOG));
+    std::fs::File::create(log_dir.join(STDERR_LOG))
+}
+
+fn stderr_tail(path: &Path) -> Vec<String> {
+    let bytes = std::fs::read(path).unwrap_or_default();
+    let text = String::from_utf8_lossy(&bytes);
+    let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
+    lines[lines.len().saturating_sub(STDERR_TAIL_LINES)..]
+        .iter()
+        .map(|line| line.to_string())
+        .collect()
 }
 
 fn create_private_file(path: &Path) -> std::io::Result<()> {

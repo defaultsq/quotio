@@ -34,7 +34,8 @@ pub fn run() {
             let binary = std::env::current_exe()?
                 .with_file_name(format!("quotio-cli{}", std::env::consts::EXE_SUFFIX));
             let data_dir = app.path().app_data_dir()?;
-            app.manage(Sidecar::start(binary, data_dir));
+            let log_dir = app.path().app_log_dir()?;
+            app.manage(Sidecar::start(binary, data_dir, log_dir));
             app.manage(Proxy::new(app.handle())?);
             tray::setup(app.handle())?;
             Ok(())
