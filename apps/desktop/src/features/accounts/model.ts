@@ -119,11 +119,13 @@ export function projectAccounts(snapshot: Snapshot, providers: Provider[], statu
   }
 
   const fetched = snapshot.usage.flatMap((usage) => (usage.fetched_at ? [Date.parse(usage.fetched_at)] : []));
+  // A refresh that found no quota still completed; the host's clock says when.
+  const completed = status.last_completed_at ? new Date(status.last_completed_at) : null;
   return {
     groups,
     attention,
     accountCount: snapshot.accounts.length,
-    lastUpdated: fetched.length > 0 ? new Date(Math.max(...fetched)) : null,
+    lastUpdated: fetched.length > 0 ? new Date(Math.max(...fetched)) : completed,
     unconnected: providers.filter((provider) => !accountsByProvider.has(provider.id)).map(providerView),
     history: {
       readable: snapshot.host.capabilities.quota_history?.available ?? false,
