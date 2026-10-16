@@ -42,8 +42,7 @@ public final class QuotioCLIServerProcess {
     private let proxyAuthDirectory: URL?
     private let proxyConfigurationURL: URL?
     private let initialPreferences: @MainActor () -> (ProviderTrackingPreferences, RefreshPreferences, Set<String>)?
-    private let applicationSupportDirectoryName: String
-    private let accountVaultNamespace: String
+    private let storage: QuotioCLIAccountStorage
     private let proxyURL: @MainActor () -> String?
     private var isStarting = false
     private var process: Process?
@@ -55,25 +54,23 @@ public final class QuotioCLIServerProcess {
     public init(
         executableURL: URL = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Helpers/quotio-cli"),
+        storage: QuotioCLIAccountStorage,
         configurationURL: URL? = nil,
         accountDataDirectory: URL? = nil,
         proxyAuthDirectory: URL? = nil,
         proxyConfigurationURL: URL? = nil,
         initialPreferences: @escaping @MainActor () -> (ProviderTrackingPreferences, RefreshPreferences, Set<String>)? = { nil },
-        applicationSupportDirectoryName: String = "app.bytrong.quotio",
-        accountVaultNamespace: String = "quotio-macos",
         proxyURL: @escaping @MainActor () -> String? = {
             UserDefaults.standard.string(forKey: "proxyURL")
         }
     ) {
         self.executableURL = executableURL
+        self.storage = storage
         self.configurationURL = configurationURL
         self.accountDataDirectory = accountDataDirectory
         self.proxyAuthDirectory = proxyAuthDirectory
         self.proxyConfigurationURL = proxyConfigurationURL
         self.initialPreferences = initialPreferences
-        self.applicationSupportDirectoryName = applicationSupportDirectoryName
-        self.accountVaultNamespace = accountVaultNamespace
         self.proxyURL = proxyURL
     }
 
@@ -86,7 +83,7 @@ public final class QuotioCLIServerProcess {
         isStarting = true
         defer { isStarting = false }
         let token = try makeToken()
-        let locations = try makeLocations()
+        let storageArguments = try makeStorageArguments()
         let process = Process()
         let input = Pipe()
         let output = Pipe()
@@ -96,10 +93,7 @@ public final class QuotioCLIServerProcess {
             "--manage",
             "--parent-pipe",
             "--listen", "127.0.0.1:0",
-            "--config", locations.configuration.path,
-            "--account-vault-namespace", accountVaultNamespace,
-            "--account-data-dir", locations.accounts.path,
-        ]
+        ] + storageArguments
         if let proxyAuthDirectory {
             process.arguments?.append(contentsOf: ["--cli-proxy-auth-dir", proxyAuthDirectory.path])
         }
@@ -202,17 +196,48 @@ public final class QuotioCLIServerProcess {
         return Data(bytes).base64EncodedString()
     }
 
-    private func makeLocations() throws -> (configuration: URL, accounts: URL) {
+    private func makeStorageArguments() throws -> [String] {
+        switch storage {
+        case .isolated(let store):
+            let locations = try makeLocations(for: store)
+            return [
+                "--config", locations.configuration.path,
+                "--account-vault-namespace", store.namespace,
+                "--account-data-dir", locations.accounts.path,
+            ]
+        case .shared(adopting: let store):
+            let locations = try locations(of: store)
+            var arguments = [
+                "--adopt-vault-namespace", store.namespace,
+                "--adopt-data-dir", locations.accounts.path,
+            ]
+            if FileManager.default.fileExists(atPath: locations.configuration.path) {
+                arguments += ["--adopt-config", locations.configuration.path]
+            }
+            return arguments
+        }
+    }
+
+    private func locations(
+        of store: QuotioCLIAccountStorage.IsolatedStore
+    ) throws -> (configuration: URL, accounts: URL) {
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
-        ).appendingPathComponent(applicationSupportDirectoryName, isDirectory: true)
-        let accounts = accountDataDirectory
-            ?? support.appendingPathComponent("QuotioCLI", isDirectory: true)
+        ).appendingPathComponent(store.applicationSupportDirectoryName, isDirectory: true)
+        return (
+            configurationURL ?? support.appendingPathComponent("quotio-cli.toml"),
+            accountDataDirectory ?? support.appendingPathComponent("QuotioCLI", isDirectory: true)
+        )
+    }
+
+    private func makeLocations(
+        for store: QuotioCLIAccountStorage.IsolatedStore
+    ) throws -> (configuration: URL, accounts: URL) {
+        let (configuration, accounts) = try locations(of: store)
         try FileManager.default.createDirectory(at: accounts, withIntermediateDirectories: true)
-        let configuration = configurationURL ?? support.appendingPathComponent("quotio-cli.toml")
         try FileManager.default.createDirectory(
             at: configuration.deletingLastPathComponent(),
             withIntermediateDirectories: true

@@ -170,6 +170,7 @@ the repository root is not a Swift package.
   view task is created. Keep required startup work in the app lifecycle/composition path.
 - The app sandbox is intentionally disabled because Quotio manages local processes and
   CLI configuration. Do not enable it without auditing every filesystem/process flow.
+- The CLI helper shares the standalone CLI's vault and config only when its signature satisfies the `dev.quotio.cli` Developer ID requirement (`QuotioCLIHelperSignature`); Debug and ad-hoc helpers keep the isolated namespace and must never be pointed at the shared vault.
 - Guard APIs newer than macOS 14 with availability checks.
 - Build port labels as `Text("localhost:" + String(port))`, not interpolated numeric
   `Text`, to avoid locale-aware number formatting.
