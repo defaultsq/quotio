@@ -270,6 +270,11 @@ struct QuotaLimitRow: View {
                     .lineLimit(1)
                 }
             }
+        } else if meter.resetsAt != nil {
+            // The window has reset since the last fetch, so the value shown is from the previous one.
+            Text("quota.reset.passed".localized())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         } else if let trendPerDay {
             Label {
                 Text(String(format: "quota.trend.week".localized(),
