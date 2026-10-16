@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.7] - 2026-10-16
+
+### Added
+
+- Add a local account from a custom config directory (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `GROK_HOME` or `GH_CONFIG_DIR`) in Accounts settings. Source rows show the directory, and a Grok directory that holds several logins asks which one to add.
+- Show when the next automatic refresh runs beside Refresh in the menu, or that auto-refresh is off.
+
+### Fixed
+
+- Say that a limit has reset when its reset time passed since the last fetch, instead of showing the previous window's value as current.
+- Name config-directory accounts by their full path, so two directories that end in the same folder name no longer collide.
+- Read the Keychain item that belongs to a custom Claude config directory, and keep the directory when the source is authorized again.
+- Removing a config-directory source that points at a default location such as `~/.codex` or `~/.grok` no longer brings it back on the next rescan.
+
 ## [1.0.0-beta.6] - 2026-10-12
 
 ### Added
