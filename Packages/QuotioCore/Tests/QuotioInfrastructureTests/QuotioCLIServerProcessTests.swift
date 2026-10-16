@@ -35,12 +35,12 @@ final class QuotioCLIServerProcessTests: XCTestCase {
         )
         let server = QuotioCLIServerProcess(
             executableURL: helper,
+            storage: .isolated(.init(namespace: "quotio-macos-test", applicationSupportDirectoryName: "app.bytrong.quotio")),
             configurationURL: directory.appendingPathComponent("config.toml"),
             accountDataDirectory: directory.appendingPathComponent("accounts"),
             proxyAuthDirectory: proxyAuthDirectory,
             proxyConfigurationURL: directory.appendingPathComponent("proxy.yaml"),
             initialPreferences: { (ProviderTrackingPreferences(disabledProviders: [.copilot], automaticallyDiscoverLogins: false), RefreshPreferences(cadence: .manual), ["disabled.json"]) },
-            accountVaultNamespace: "quotio-macos-test",
             proxyURL: { "http://proxy.example:8080" }
         )
 
@@ -80,6 +80,7 @@ final class QuotioCLIServerProcessTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
         let server = QuotioCLIServerProcess(
             executableURL: helper,
+            storage: .isolated(.init(namespace: "quotio-macos-test", applicationSupportDirectoryName: "app.bytrong.quotio")),
             configurationURL: directory.appendingPathComponent("config.toml"),
             accountDataDirectory: directory.appendingPathComponent("accounts")
         )
@@ -115,6 +116,7 @@ final class QuotioCLIServerProcessTests: XCTestCase {
         )
         let server = QuotioCLIServerProcess(
             executableURL: helper,
+            storage: .isolated(.init(namespace: "quotio-macos-test", applicationSupportDirectoryName: "app.bytrong.quotio")),
             configurationURL: directory.appendingPathComponent("config.toml"),
             accountDataDirectory: directory.appendingPathComponent("accounts")
         )
