@@ -233,6 +233,10 @@ welcome. Use the repository's
 [GitHub issue templates](https://github.com/nguyenphutrong/quotio/issues/new/choose)
 to provide the context needed to investigate your request.
 
+Read the [contribution guide](CONTRIBUTING.md) before opening a pull request:
+current development targets `master`; legacy macOS 0.x fixes, including CLI agent
+configuration, must start from and target `v0.x`.
+
 ## License
 
 Quotio is available under the [MIT License](LICENSE).

@@ -3,8 +3,9 @@
 ## Project
 
 Quotio is a native macOS menu bar and window app for operating CLIProxyAPI. It manages
-the local proxy lifecycle, provider OAuth accounts, quota monitoring, CLI agent
-configuration, tunnels, and updates.
+the local proxy lifecycle, provider OAuth accounts, quota monitoring, tunnels, and updates.
+Legacy CLI agent configuration belongs to the `v0.x` branch, not `master`; see
+`CONTRIBUTING.md` at the repository root.
 
 - Swift 6 and SwiftUI, with targeted AppKit integration
 - Minimum deployment target: macOS 14.0
@@ -161,8 +162,6 @@ the repository root is not a Swift package.
   terminate Quotio's own process.
 - `FileProxyVersionRepository` stores versioned binaries behind a `current` symlink. Never
   remove the active version during cleanup.
-- Agent configuration changes must preserve user-owned keys/content and create
-  collision-safe timestamped backups without overwriting an existing backup.
 - Treat auth and token files as hostile input: validate names and contents, use atomic
   private writes, and never follow a symlink destination.
 - Never log or commit tokens, authorization headers, OAuth codes, cookies, API keys,
