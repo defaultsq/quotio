@@ -1175,6 +1175,7 @@ pub async fn run(args: ServeArgs) -> Result<(), ServerError> {
     if !args.listen.ip().is_loopback() {
         return Err(ServerError::Listen);
     }
+    let adoption = args.adoption()?;
     let proxy_auth_directory = args
         .cli_proxy_auth_dir
         .or_else(crate::accounts::proxy::default_auth_directory);
@@ -1194,6 +1195,9 @@ pub async fn run(args: ServeArgs) -> Result<(), ServerError> {
             provider_timeout: args.timeout,
         },
     );
+    if let Some(source) = &adoption {
+        crate::accounts::adopt::config(source, &store);
+    }
     let mut parent = if args.parent_pipe {
         Some(bootstrap::Parent::open().await?)
     } else {
@@ -1316,6 +1320,13 @@ pub async fn run(args: ServeArgs) -> Result<(), ServerError> {
     );
     let worker_state = state.clone();
     let mut worker = tokio::spawn(async move {
+        if let (Some(source), Some(vault)) = (&adoption, &worker_state.vault)
+            && let Ok(_guard) =
+                crate::accounts::service::mutation_guard(&worker_state.commit_guard).await
+            && crate::accounts::adopt::vault(source, vault, worker_state.history.as_ref()).await
+        {
+            worker_state.invalidate().await;
+        }
         loop {
             // Serve cached observations before discovery, which can take many seconds.
             let generation = worker_state.generation.load(Ordering::SeqCst);

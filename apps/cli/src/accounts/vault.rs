@@ -46,7 +46,7 @@ impl VaultNamespace {
         format!("vault.{}", self.0)
     }
 
-    fn lock_name(&self) -> String {
+    pub(crate) fn lock_name(&self) -> String {
         format!("accounts-{}.lock", self.0)
     }
 

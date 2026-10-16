@@ -38,6 +38,9 @@ loopback. Ctrl-C or SIGTERM stops the host on Unix.
 | `--cli-proxy-config` | None | Absolute CLIProxyAPI YAML config for provider keys |
 | `--account-vault-namespace` | None | Separate app-owned vault named with 1-32 lowercase letters, digits or hyphens; requires `--manage`, `--parent-pipe` and `--account-data-dir` |
 | `--account-data-dir` | None | Absolute directory for that vault's locks and platform data |
+| `--adopt-vault-namespace` | None | Fold this former app-owned vault, its history and config into the defaults once, then serve the default vault; requires `--manage`, `--parent-pipe` and `--adopt-data-dir` |
+| `--adopt-data-dir` | None | Absolute directory holding that vault's locks, history and completion marker |
+| `--adopt-config` | None | Absolute former config whose keys fill keys missing from the default config |
 | `--parent-pipe` | Off | Native parent protocol; see [Native parent bootstrap](#native-parent-bootstrap) |
 
 Without overrides, the host uses `enabled_providers` minus `disabled_providers`.
