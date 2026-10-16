@@ -472,7 +472,9 @@ private final class ProductionAppRuntimeServices: AppRuntimeServices {
             quota: quotaScreenModel.state,
             menuBarPreferences: menuBarSettings.preferences,
             language: languageManager.currentLanguage,
-            trackingPreferences: quotaController.trackingPreferences
+            trackingPreferences: quotaController.trackingPreferences,
+            refreshInterval: quotaController.monitoringSettings?.refreshInterval,
+            nextRefreshAt: quotaController.nextRefreshAt
         )
     }
 

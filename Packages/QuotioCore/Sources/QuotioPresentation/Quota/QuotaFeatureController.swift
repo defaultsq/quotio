@@ -17,6 +17,7 @@ public final class QuotaFeatureController {
     public var canDiscoverNative: Bool { providers.contains { $0.actions.contains("discover_native") } }
     public private(set) var providers: [MonitoringProvider] = []
     public private(set) var monitoringSettings: MonitoringSettings?
+    public private(set) var nextRefreshAt: Date?
     public private(set) var settingsError: String?
     public private(set) var isUpdatingSettings = false
     public var trackingPreferences: ProviderTrackingPreferences {
@@ -83,10 +84,13 @@ public final class QuotaFeatureController {
         settingsRequestID = requestID
         do {
             async let catalog = settingsService.monitoringProviders()
+            async let next = try? settingsService.nextRefreshAt()
             let settings = try await settingsService.monitoringSettings()
             let descriptors = try await catalog
+            let nextRefreshAt = await next ?? nil
             guard settingsRequestID == requestID else { return }
             monitoringSettings = settings
+            self.nextRefreshAt = nextRefreshAt
             providers = descriptors
             settingsError = nil
         } catch {

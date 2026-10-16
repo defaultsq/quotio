@@ -352,6 +352,12 @@ final class StatusBarMenuRenderer {
             .buttonStyle(.plain)
             .disabled(!self.snapshot.canRefresh)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .trailing) {
+                if let schedule = self.snapshot.refreshSchedule {
+                    MenuRefreshScheduleText(schedule: schedule)
+                        .allowsHitTesting(false)
+                }
+            }
             .padding(.horizontal, MenuItemMetrics.contentInset)
             .padding(.vertical, 6)
         })
@@ -696,6 +702,28 @@ private struct MenuAccountCardView: View {
                 .menuNativeTooltip(model.tooltip ?? "")
             }
         }
+    }
+}
+
+/// When the host fetches next, beside the Refresh command.
+private struct MenuRefreshScheduleText: View {
+    let schedule: StatusBarRefreshSchedule
+
+    var body: some View {
+        Group {
+            switch schedule {
+            case .manual:
+                Text("menubar.refresh.manual".localized())
+            case .next(let date):
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(String(format: "menubar.refresh.next".localized(),
+                                QuotaTimeText.duration(until: date, now: context.date)))
+                }
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
     }
 }
 

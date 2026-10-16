@@ -265,6 +265,7 @@ private actor SnapshotMonitoringSettings: MonitoringSettingsManaging {
     }
 
     func updateMonitoringSettings(_ settings: MonitoringSettings) -> MonitoringSettings { settings }
+    func nextRefreshAt() -> Date? { nil }
 }
 
 private actor SnapshotOAuthAuthorizer: OAuthAuthorizing {

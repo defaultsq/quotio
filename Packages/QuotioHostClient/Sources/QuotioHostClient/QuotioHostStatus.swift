@@ -7,6 +7,8 @@ public struct QuotioHostStatus: Decodable, Sendable {
     public let accessMode: String
     public let ready: Bool
     public let refreshing: Bool
+    /// Absent while a refresh runs and whenever scheduled refresh is off.
+    public let nextRefreshAt: Date?
 }
 
 extension QuotioHostHTTPClient {

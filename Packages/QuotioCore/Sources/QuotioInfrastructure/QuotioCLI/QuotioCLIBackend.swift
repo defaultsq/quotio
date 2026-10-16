@@ -640,6 +640,11 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         return Self.monitoringSettings(value)
     }
 
+    public func nextRefreshAt() async throws -> Date? {
+        guard let client else { throw QuotioHostClientError.disconnected }
+        return try await client.status().nextRefreshAt
+    }
+
     private static func monitoringSettings(_ value: QuotioHostSettings) -> MonitoringSettings {
         return MonitoringSettings(
             revision: value.revision,

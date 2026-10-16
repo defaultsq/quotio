@@ -435,4 +435,5 @@ private actor QuotaFeatureMonitoringSettings: MonitoringSettingsManaging {
         value = settings
         return value
     }
+    func nextRefreshAt() -> Date? { nil }
 }

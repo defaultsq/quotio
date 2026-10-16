@@ -28,11 +28,28 @@ struct StatusBarMenuDisplaySettings: Equatable, Sendable {
 
 }
 
+enum StatusBarRefreshSchedule: Equatable, Sendable {
+    case manual
+    case next(Date)
+
+    /// Nil while the settings are unknown or a scheduled refresh is running.
+    init?(refreshInterval: Int?, nextRefreshAt: Date?) {
+        switch refreshInterval {
+        case nil: return nil
+        case 0: self = .manual
+        default:
+            guard let nextRefreshAt else { return nil }
+            self = .next(nextRefreshAt)
+        }
+    }
+}
+
 public struct StatusBarMenuSnapshot: Equatable, Sendable {
     let providers: [StatusBarMenuProviderSnapshot]
     let selectedProvider: QuotaProvider?
     let isLoadingQuotas: Bool
     let canRefresh: Bool
+    let refreshSchedule: StatusBarRefreshSchedule?
     let displaySettings: StatusBarMenuDisplaySettings
     let language: AppLanguage
 }
@@ -43,7 +60,9 @@ public enum StatusBarMenuSnapshotMapper {
         quota: QuotaSnapshot,
         menuBarPreferences: MenuBarPreferences,
         language: AppLanguage,
-        trackingPreferences: ProviderTrackingPreferences = ProviderTrackingPreferences()
+        trackingPreferences: ProviderTrackingPreferences = ProviderTrackingPreferences(),
+        refreshInterval: Int? = nil,
+        nextRefreshAt: Date? = nil
     ) -> StatusBarMenuSnapshot {
         let disabledAccounts = Set(monitorAccounts.lazy.filter(\.isDisabled).map {
             "\($0.providerID.rawValue):\($0.accountKey)"
@@ -87,6 +106,7 @@ public enum StatusBarMenuSnapshotMapper {
             },
             isLoadingQuotas: !quota.refreshingProviders.isEmpty,
             canRefresh: quota.canRefresh,
+            refreshSchedule: StatusBarRefreshSchedule(refreshInterval: refreshInterval, nextRefreshAt: nextRefreshAt),
             displaySettings: StatusBarMenuDisplaySettings(
                 quotaDisplayMode: menuBarPreferences.quotaDisplayMode,
                 quotaDisplayStyle: menuBarPreferences.quotaDisplayStyle,
