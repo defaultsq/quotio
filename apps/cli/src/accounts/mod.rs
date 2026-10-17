@@ -759,10 +759,11 @@ impl Document {
         self.accounts.is_empty()
             && !self.has_pairing()
             && !self.has_refresh_reservations()
-            && self
-                .resolved
-                .as_ref()
-                .is_none_or(|registry| !registry.has_labels() && !registry.has_suppressions())
+            && self.resolved.as_ref().is_none_or(|registry| {
+                !registry.has_labels()
+                    && !registry.has_suppressions()
+                    && !registry.has_history_epochs()
+            })
     }
 
     pub fn absorb(&mut self, mut other: Document) -> Result<Absorbed, AccountError> {
