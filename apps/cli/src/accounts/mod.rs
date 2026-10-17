@@ -852,7 +852,7 @@ impl Document {
                 } else if other.has_pairing() && mine.host_id != theirs.host_id {
                     tracing::warn!("vault_adoption_pairing_dropped");
                 }
-                Some(mine.absorb(theirs, &id_map))
+                Some(mine.absorb(theirs, &id_map)?)
             }
             _ => None,
         };
