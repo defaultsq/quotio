@@ -759,6 +759,7 @@ impl Document {
         self.accounts.is_empty()
             && !self.has_pairing()
             && !self.has_refresh_reservations()
+            && self.mutation_receipts.is_empty()
             && self.resolved.as_ref().is_none_or(|registry| {
                 !registry.has_labels()
                     && !registry.has_suppressions()
