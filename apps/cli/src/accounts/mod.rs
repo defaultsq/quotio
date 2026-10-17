@@ -880,6 +880,24 @@ impl Document {
                     .or_insert_with(|| id_map.get(&owner).cloned().unwrap_or(owner));
             }
         }
+        for (key, receipt) in other.mutation_receipts {
+            if self.mutation_receipts.contains_key(&key) {
+                continue;
+            }
+            if self.mutation_receipts.len() >= 4096 {
+                break;
+            }
+            self.mutation_receipts.insert(
+                key,
+                MutationReceipt {
+                    fingerprint: receipt.fingerprint,
+                    account_id: id_map
+                        .get(&receipt.account_id)
+                        .cloned()
+                        .unwrap_or(receipt.account_id),
+                },
+            );
+        }
         self.version = self.version.max(other.version);
         Ok(Absorbed {
             changed: serde_json::to_vec(&*self).map_err(|_| AccountError::Corrupt)? != before,
