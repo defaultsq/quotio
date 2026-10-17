@@ -1207,7 +1207,9 @@ pub async fn run(args: ServeArgs) -> Result<(), ServerError> {
         .as_mut()
         .and_then(bootstrap::Parent::take_preferences)
     {
-        Some(preferences) if adoption.as_ref().is_none_or(|source| !source.adopted()) => {
+        Some(preferences)
+            if config_adopted && adoption.as_ref().is_none_or(|source| !source.adopted()) =>
+        {
             store.import_native_preferences(preferences)
         }
         _ => store.load(),
