@@ -24,7 +24,7 @@ impl Source {
             .with_extension("adopted")
     }
 
-    fn adopted(&self) -> bool {
+    pub(crate) fn adopted(&self) -> bool {
         std::fs::symlink_metadata(self.marker_path()).is_ok_and(|meta| meta.is_file())
     }
 }
