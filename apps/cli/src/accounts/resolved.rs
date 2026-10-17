@@ -481,14 +481,19 @@ impl Registry {
         &mut self,
         other: Registry,
         id_map: &BTreeMap<String, String>,
-    ) -> crate::history::Rewrite {
+    ) -> Result<crate::history::Rewrite, AccountError> {
         let mut landed: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for (source_id, binding) in &other.bindings {
             let Some(id) = id_map.get(source_id) else {
                 continue;
             };
             let logical = match self.bindings.get(id) {
-                Some(existing) => existing.account_id.clone(),
+                Some(existing) => {
+                    if let (None, Some(identity)) = (&existing.verified, &binding.verified) {
+                        self.observe(id, identity)?;
+                    }
+                    self.bindings[id].account_id.clone()
+                }
                 None => {
                     let joined = binding.verified.as_ref().and_then(|identity| {
                         self.bindings
@@ -591,11 +596,11 @@ impl Registry {
                 .extend(keys);
         }
         self.revision = self.revision.max(other.revision);
-        crate::history::Rewrite {
+        Ok(crate::history::Rewrite {
             host: self.host_id.clone(),
             account_renames: accounts,
             epoch_renames: epochs,
-        }
+        })
     }
 
     pub fn synchronize(&mut self, accounts: &[Account]) -> Result<(), AccountError> {
