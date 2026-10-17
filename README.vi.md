@@ -94,6 +94,23 @@ is up to $150.
       <a href="https://88api.ai/sign-up?aff=OMpN">Explore 88API →</a>
     </td>
   </tr>
+  <tr>
+    <td width="180" align="center">
+      <a href="https://proxy-seller.com/?partner=442060D973F44C90">
+        <img src=".github/assets/sponsors/proxy-seller.png" alt="Proxy-Seller logo" width="160" />
+      </a>
+    </td>
+    <td>
+      <a href="https://proxy-seller.com/?partner=442060D973F44C90">Proxy-Seller</a> gives you reliable proxy infrastructure for any
+      workflow: private residential, mobile (4G/5G/LTE), ISP, and datacenter IPv4/IPv6
+      proxies, all with HTTP(S) and SOCKS5 support. Tap into 47M+ residential IPs across
+      220+ locations, target exactly the country, city, or ISP you need, and count on
+      99.7% uptime backed by 24/7 support. Quotio users get 15% off with promo code
+      <strong>QUOTIO</strong>.
+      <br />
+      <a href="https://proxy-seller.com/?partner=442060D973F44C90">Explore Proxy-Seller →</a>
+    </td>
+  </tr>
 </table>
 
 Interested in sponsoring Quotio? Contact
