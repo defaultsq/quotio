@@ -1195,9 +1195,9 @@ pub async fn run(args: ServeArgs) -> Result<(), ServerError> {
             provider_timeout: args.timeout,
         },
     );
-    if let Some(source) = &adoption {
-        crate::accounts::adopt::config(source, &store);
-    }
+    let config_adopted = adoption
+        .as_ref()
+        .is_none_or(|source| crate::accounts::adopt::config(source, &store));
     let mut parent = if args.parent_pipe {
         Some(bootstrap::Parent::open().await?)
     } else {
@@ -1323,7 +1323,13 @@ pub async fn run(args: ServeArgs) -> Result<(), ServerError> {
         if let (Some(source), Some(vault)) = (&adoption, &worker_state.vault)
             && let Ok(_guard) =
                 crate::accounts::service::mutation_guard(&worker_state.commit_guard).await
-            && crate::accounts::adopt::vault(source, vault, worker_state.history.as_ref()).await
+            && crate::accounts::adopt::vault(
+                source,
+                vault,
+                worker_state.history.as_ref(),
+                config_adopted,
+            )
+            .await
         {
             worker_state.invalidate().await;
         }

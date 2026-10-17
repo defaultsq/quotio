@@ -29,16 +29,27 @@ impl Source {
     }
 }
 
-pub fn config(source: &Source, store: &crate::settings::SettingsStore) {
+/// Returns whether config adoption is complete; a transient failure retries next launch.
+pub fn config(source: &Source, store: &crate::settings::SettingsStore) -> bool {
     let Some(path) = &source.config else {
-        return;
+        return true;
     };
     if source.adopted() {
-        return;
+        return true;
     }
     match store.seed_from_file(path) {
-        Ok(keys) => tracing::info!(keys, "vault_adoption_config_seeded"),
-        Err(error) => tracing::warn!(?error, "vault_adoption_config_skipped"),
+        Ok(keys) => {
+            tracing::info!(keys, "vault_adoption_config_seeded");
+            true
+        }
+        Err(crate::settings::SettingsError::Invalid) => {
+            tracing::warn!("vault_adoption_config_invalid");
+            true
+        }
+        Err(error) => {
+            tracing::warn!(?error, "vault_adoption_config_skipped");
+            false
+        }
     }
 }
 
@@ -46,6 +57,7 @@ pub async fn vault(
     source: &Source,
     target: &Vault,
     history: Option<&crate::history::History>,
+    config_adopted: bool,
 ) -> bool {
     if source.adopted() {
         return false;
@@ -93,6 +105,10 @@ pub async fn vault(
             return absorbed.changed;
         }
     };
+    if !config_adopted {
+        tracing::info!("vault_adoption_marker_deferred");
+        return absorbed.changed || rows > 0;
+    }
     let marker = Marker {
         schema_version: 1,
         adopted_at: time::OffsetDateTime::now_utc(),
