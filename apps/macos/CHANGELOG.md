@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.8] - 2026-10-18
+
 ### Changed
 
 - Quotio and Quotio Beta now share accounts, quota history, and settings with the standalone `quotio` CLI. The first launch moves the app's existing accounts, history, and settings into the shared store once; an account that exists in both keeps the fresher sign-in. macOS asks once for permission to read the app's former accounts from the Keychain; allow it, or the move is retried on the next launch. Keep the CLI at least as new as the app.
