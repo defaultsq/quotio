@@ -292,10 +292,28 @@ impl Vault {
         namespace: &VaultNamespace,
         data_directory: &std::path::Path,
     ) -> Result<Self, AccountError> {
+        Self::isolated(false, namespace, data_directory)
+    }
+    /// Reads can wait on a Keychain prompt until the user answers it.
+    pub fn isolated_interactive(
+        namespace: &VaultNamespace,
+        data_directory: &std::path::Path,
+    ) -> Result<Self, AccountError> {
+        Self::isolated(true, namespace, data_directory)
+    }
+    fn isolated(
+        interactive: bool,
+        namespace: &VaultNamespace,
+        data_directory: &std::path::Path,
+    ) -> Result<Self, AccountError> {
         if !data_directory.is_absolute() {
             return Err(AccountError::Storage);
         }
-        Self::system_with_interaction(false, Some(namespace), Some(data_directory.to_owned()))
+        Self::system_with_interaction(
+            interactive,
+            Some(namespace),
+            Some(data_directory.to_owned()),
+        )
     }
     fn system_with_interaction(
         _interactive: bool,

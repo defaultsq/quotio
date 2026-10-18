@@ -62,14 +62,22 @@ pub async fn vault(
     if source.adopted() {
         return false;
     }
-    let former = match Vault::isolated_for_usage(&source.namespace, &source.data_dir) {
+    // The former Keychain item trusts only the helper that created it. A helper
+    // signed under another identifier needs the user's approval to read it once.
+    let former = match Vault::isolated_interactive(&source.namespace, &source.data_dir) {
         Ok(former) => former,
         Err(error) => {
             tracing::warn!(?error, "vault_adoption_source_unavailable");
             return false;
         }
     };
-    let document = match super::service::begin(former.clone()).await {
+    let reader = former.clone();
+    // No timeout: the read waits for the user to answer the prompt.
+    let read = tokio::task::spawn_blocking(move || reader.begin())
+        .await
+        .map_err(|_| super::AccountError::Storage)
+        .and_then(|read| read);
+    let document = match read {
         Ok(transaction) => transaction.document,
         Err(error) => {
             tracing::warn!(?error, "vault_adoption_source_unavailable");
