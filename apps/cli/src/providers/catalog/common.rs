@@ -348,6 +348,7 @@ pub(crate) async fn security_tool_password(
 }
 
 /// `security -w` prints a value with any non-printable byte, including non-ASCII UTF-8, as hex.
+#[cfg(target_os = "macos")]
 fn security_password(bytes: Vec<u8>) -> Vec<u8> {
     let raw = bytes.trim_ascii();
     let hex = |byte: u8| (byte as char).to_digit(16).map(|digit| digit as u8);
