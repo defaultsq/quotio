@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep reading Claude Code, GitHub CLI, Cursor agent and Factory logins after those tools renew them. Each renewal used to revoke Quotio's Keychain access, so Claude accounts showed "Quotio could not read the credential storage" again a few hours after Grant Access.
+
 ## [1.0.0-beta.8] - 2026-10-18
 
 ### Changed
