@@ -118,6 +118,10 @@ pub(crate) async fn authorize(mut input: SourceInput) -> Result<SourceInput, Acc
         *entry_key = source.entry_key;
     }
     let (service, account) = target(&input)?;
+    if matches!(input, SourceInput::ClaudeNative { .. }) {
+        crate::providers::catalog::oauth_primary::authorize_claude_keychain(&service).await?;
+        return Ok(input);
+    }
     let account = account.map(str::to_owned);
     tokio::task::spawn_blocking(move || {
         use crate::providers::catalog::common;
