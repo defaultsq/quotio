@@ -224,6 +224,12 @@ pub(crate) async fn native_keychain(
     service: &str,
     account: Option<&str>,
 ) -> Result<Option<Vec<u8>>, ProviderError> {
+    if common::saved_by_security_tool(service, account) {
+        return match common::security_tool_password(service, account, NATIVE_READ_TIMEOUT).await {
+            Err(ProviderError::CredentialStorage) => Err(ProviderError::LocalCredentialStorage),
+            result => result,
+        };
+    }
     let service = service.to_owned();
     let account = account.map(str::to_owned);
     match tokio::time::timeout(
@@ -236,63 +242,6 @@ pub(crate) async fn native_keychain(
         Ok(Ok(Err(ProviderError::CredentialStorage))) => Err(ProviderError::LocalCredentialStorage),
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err(ProviderError::Internal),
-        Err(_) => Err(ProviderError::CredentialStorage),
-    }
-}
-
-// Claude Code saves its login through `/usr/bin/security`, and each save resets the item's
-// partition list to that tool, dropping the access a user granted to Quotio. Reading through
-// the same tool keeps working after every token renewal.
-async fn claude_keychain(service: &str, wait: Duration) -> Result<Option<Vec<u8>>, ProviderError> {
-    #[cfg(target_os = "macos")]
-    {
-        let (status, bytes) = tokio::time::timeout(
-            wait,
-            crate::providers::process::output_status(
-                Path::new("/usr/bin/security"),
-                &["find-generic-password", "-s", service, "-w"],
-            ),
-        )
-        .await
-        .map_err(|_| ProviderError::LocalCredentialStorage)?
-        .map_err(|_| ProviderError::LocalCredentialStorage)?;
-        match status.code() {
-            Some(0) => Ok(Some(security_password(bytes))),
-            Some(44) => Ok(None),
-            _ => Err(ProviderError::LocalCredentialStorage),
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (service, wait);
-        Err(ProviderError::Unavailable)
-    }
-}
-
-/// `security -w` prints a value with any non-printable byte, including non-ASCII UTF-8, as hex.
-fn security_password(bytes: Vec<u8>) -> Vec<u8> {
-    let raw = bytes.trim_ascii();
-    let hex = |byte: u8| (byte as char).to_digit(16).map(|digit| digit as u8);
-    if raw.is_empty()
-        || !raw.len().is_multiple_of(2)
-        || !raw.iter().all(|byte| hex(*byte).is_some())
-    {
-        return bytes;
-    }
-    raw.chunks(2)
-        .filter_map(|pair| Some(hex(pair[0])? << 4 | hex(pair[1])?))
-        .collect()
-}
-
-// Popups stay open until the user answers; ending `security` early would close one before
-// Always Allow is saved.
-const CLAUDE_KEYCHAIN_PROMPT_WAIT: Duration = Duration::from_secs(10 * 60);
-
-// Only the explicit native-source authorization operation calls this function.
-pub(crate) async fn authorize_claude_keychain(service: &str) -> Result<(), ProviderError> {
-    match claude_keychain(service, CLAUDE_KEYCHAIN_PROMPT_WAIT).await {
-        Ok(Some(_)) => Ok(()),
-        Ok(None) => Err(ProviderError::Authentication),
         Err(_) => Err(ProviderError::CredentialStorage),
     }
 }
@@ -402,7 +351,7 @@ pub(crate) async fn claude_reference_login(
 ) -> Result<ClaudeLogin, ProviderError> {
     let bytes = match &source.path {
         Some(path) => native_file(path.clone()).await?,
-        None => claude_keychain(&source.keychain_service(), NATIVE_READ_TIMEOUT).await?,
+        None => native_keychain(&source.keychain_service(), None).await?,
     }
     .ok_or(ProviderError::Authentication)?;
     claude_login_from_bytes(&bytes)?.ok_or(ProviderError::Authentication)
@@ -410,7 +359,7 @@ pub(crate) async fn claude_reference_login(
 
 async fn native_claude_login() -> Result<ClaudeLogin, ProviderError> {
     let mut last = ProviderError::Authentication;
-    match claude_keychain("Claude Code-credentials", NATIVE_READ_TIMEOUT).await {
+    match native_keychain("Claude Code-credentials", None).await {
         Ok(Some(bytes)) => match claude_login_from_bytes(&bytes) {
             Ok(Some(value)) => return Ok(value),
             Ok(None) => (),
