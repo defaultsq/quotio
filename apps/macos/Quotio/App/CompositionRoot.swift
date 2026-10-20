@@ -102,7 +102,8 @@ enum CompositionRoot {
             proxyConfigurationURL: URL(fileURLWithPath: paths.configPath),
             initialPreferences: {
                 (providerTrackingRepository.load(), UserDefaultsRefreshPreferencesRepository().load(), authFileState.disabledAuthFileNames())
-            }
+            },
+            logger: OSApplicationLogger(subsystem: AppIdentity.bundleIdentifier, category: "NativeQuota")
         )
         let companionService = QuotioCompanionService()
         let reconnectQuotioServer: @MainActor @Sendable () async -> Bool = {
@@ -396,6 +397,12 @@ private final class ProductionAppRuntimeServices: AppRuntimeServices {
                         statusBarManager?.closeMenu()
                     }
                     navigationScreenModel.currentPage = .general
+                    windowPresenter.showMainWindow()
+                },
+                openProviderSettings: { [weak statusBarManager, windowPresenter, navigationScreenModel] provider in
+                    statusBarManager?.closeMenu()
+                    if let provider { navigationScreenModel.selectProvider(provider) }
+                    else { navigationScreenModel.showProviders() }
                     windowPresenter.showMainWindow()
                 },
                 quit: { [applicationPlatform] in

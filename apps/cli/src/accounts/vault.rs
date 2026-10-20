@@ -170,7 +170,14 @@ impl Backend for Keychain {
                     ),
                 )
             })
-            .map_err(|_| AccountError::Storage)?;
+            .map_err(|error| {
+                tracing::warn!(
+                    operation = "authorize",
+                    status = error.code(),
+                    "vault_keychain_authorize_failed"
+                );
+                AccountError::Storage
+            })?;
             self.read().map(|_| ())
         }
         #[cfg(not(target_os = "macos"))]
@@ -187,7 +194,11 @@ impl Backend for Keychain {
                 Ok(bytes) => Ok(Some(bytes)),
                 Err(e) if e.code() == -25300 => Ok(None),
                 Err(error) => {
-                    tracing::warn!(status = error.code(), "vault_keychain_read_failed");
+                    tracing::warn!(
+                        operation = "read",
+                        status = error.code(),
+                        "vault_keychain_read_failed"
+                    );
                     Err(AccountError::Storage)
                 }
             }
@@ -203,7 +214,14 @@ impl Backend for Keychain {
             crate::keychain::with_interaction(self.interactive, || {
                 security_framework::passwords::set_generic_password_options(bytes, self.options())
             })
-            .map_err(|_| AccountError::Storage)
+            .map_err(|error| {
+                tracing::warn!(
+                    operation = "write",
+                    status = error.code(),
+                    "vault_keychain_write_failed"
+                );
+                AccountError::Storage
+            })
         }
         #[cfg(not(target_os = "macos"))]
         {
