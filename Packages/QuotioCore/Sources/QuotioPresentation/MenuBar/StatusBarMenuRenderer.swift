@@ -141,6 +141,7 @@ private final class StatusBarMenuHostingView<Content: View>: NSHostingView<Conte
 final class StatusBarMenuRenderer {
     private var snapshot: StatusBarMenuSnapshot
     @ObservationIgnored private weak var refreshItem: NSMenuItem?
+    @ObservationIgnored private weak var emptyStateItem: NSMenuItem?
     @ObservationIgnored private var recoveryItems: [(item: StatusBarCommandMenuItem, separator: NSMenuItem, accountID: QuotaAccountID)] = []
     private let commands: StatusBarCommandDispatcher
     private let providerFilterController: StatusBarProviderFilterController
@@ -260,7 +261,7 @@ final class StatusBarMenuRenderer {
 
             menu.addItem(NSMenuItem.separator())
         } else {
-            menu.addItem(snapshot.hostWarning != nil ? buildHostWarningItem() : buildEmptyStateItem())
+            menu.addItem(buildEmptyStateItem())
             menu.addItem(NSMenuItem.separator())
         }
         
@@ -285,6 +286,7 @@ final class StatusBarMenuRenderer {
     func update(snapshot: StatusBarMenuSnapshot) {
         self.snapshot = snapshot
         refreshItem?.isEnabled = snapshot.canRefresh && !snapshot.isLoadingQuotas
+        emptyStateItem?.identifier = hostIssueIdentifier
         for recovery in recoveryItems {
             let account = snapshot.providers.first { $0.provider == recovery.accountID.provider }?
                 .accounts.first { $0.id == recovery.accountID }
@@ -422,10 +424,6 @@ final class StatusBarMenuRenderer {
     // MARK: - Empty State
     
     private func buildEmptyStateItem() -> NSMenuItem {
-        let emptyView = MenuEmptyStateView()
-        return viewItem(for: emptyView, title: "menubar.noData".localized())
-    }
-    private func buildHostWarningItem() -> NSMenuItem {
         let item = viewItem(for: MenuContent {
             Group {
                 if let warning = self.snapshot.hostWarning {
@@ -436,11 +434,18 @@ final class StatusBarMenuRenderer {
                     )
                     .padding(.horizontal, MenuItemMetrics.contentInset)
                     .padding(.vertical, 8)
+                } else {
+                    MenuEmptyStateView()
                 }
             }
-        })
-        item.identifier = NSUserInterfaceItemIdentifier("quotaHostIssue")
+        }, title: "menubar.noData".localized())
+        item.identifier = hostIssueIdentifier
+        emptyStateItem = item
         return item
+    }
+
+    private var hostIssueIdentifier: NSUserInterfaceItemIdentifier? {
+        snapshot.hostWarning == nil ? nil : NSUserInterfaceItemIdentifier("quotaHostIssue")
     }
 
     

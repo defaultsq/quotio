@@ -165,6 +165,7 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         cancelHistoryRequests()
         connectionID = UUID()
         client = nil
+        snapshot.canRefresh = false
         snapshot.historyAvailability = historyAvailability()
         publish()
         markFailure(for: knownProviders, hostFailure: true)
@@ -665,7 +666,9 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         importedAccounts: Set<String>? = nil
     ) async {
         guard let client, activeMode == mode else { return }
-        let domainProviders = providers.isEmpty ? knownProviders : Set(providers.compactMap(QuotaProvider.init(rawValue:)))
+        let domainProviders = providers.isEmpty
+            ? knownProviders.union(snapshot.providerNames.keys)
+            : Set(providers.compactMap(QuotaProvider.init(rawValue:)))
         guard domainProviders.isDisjoint(with: snapshot.refreshingProviders) else { return }
         let requestConnection = connectionID
         snapshot.refreshingProviders.formUnion(domainProviders)
@@ -704,7 +707,12 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
             guard activeMode == mode, connectionID == requestConnection else { return }
             if let problem = Self.storageProblem(error) { storageProblem = problem }
             let accountKeys = accountID.map { Set([$0]) } ?? importedAccounts
-            markFailure(for: domainProviders, accountKeys: accountKeys, reason: Self.refreshFailureReason(error))
+            markFailure(
+                for: providers.isEmpty ? knownProviders : domainProviders,
+                accountKeys: accountKeys,
+                reason: Self.refreshFailureReason(error),
+                hostFailure: providers.isEmpty
+            )
             await logger?.write(.warning, message: "Quota refresh failed=\(Self.failureCategory(error))")
         }
     }
@@ -843,7 +851,8 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
             snapshot.hostIssue = QuotaRefreshIssue(kind: .failed, occurredAt: now, reason: reason)
             changed = true
         }
-        for account in knownAccounts where providers.contains(account.provider) {
+        let activeAccounts = knownAccounts.filter { snapshot.accountStates[$0]?.connection != .disabled }
+        for account in activeAccounts where providers.contains(account.provider) {
             guard accountKeys?.contains(account.accountKey) ?? true else { continue }
             let previous = snapshot.accountStates[account]
             let state = AccountMonitoringState(
@@ -860,7 +869,8 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
             }
         }
         if accountKeys == nil {
-            for provider in providers where snapshot.issues[provider]?.kind != .failed || snapshot.issues[provider]?.reason != reason {
+            let disabledOnly = Set(knownAccounts.map(\.provider)).subtracting(activeAccounts.map(\.provider))
+            for provider in providers.subtracting(disabledOnly) where snapshot.issues[provider]?.kind != .failed || snapshot.issues[provider]?.reason != reason {
                 snapshot.issues[provider] = QuotaRefreshIssue(kind: .failed, occurredAt: now, reason: reason)
                 changed = true
             }
