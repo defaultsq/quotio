@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.10] - 2026-10-20
+
 ### Fixed
 
 - Mark retained quota as out of date when the local host cannot read its snapshot. Menu bar accounts now show the refresh failure, the last successful update, and a retry or account-settings action instead of silently keeping a fresh status.
