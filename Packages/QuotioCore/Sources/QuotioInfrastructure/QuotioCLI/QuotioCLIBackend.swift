@@ -679,7 +679,8 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
             : Set(providers.compactMap(QuotaProvider.init(rawValue:)))
         guard domainProviders.isDisjoint(with: snapshot.refreshingProviders) else { return }
         let requestConnection = connectionID
-        refreshFailures.removeAll { !$0.providers.isDisjoint(with: domainProviders) }
+        let retryScope = accountID.map { Set([$0]) } ?? importedAccounts
+        refreshFailures = refreshFailures.compactMap { $0.retiring(domainProviders, accountKeys: retryScope) }
         snapshot.refreshingProviders.formUnion(domainProviders)
         publish()
         defer {
@@ -718,7 +719,7 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
             let failure = QuotaFailure(
                 revision: hostSnapshot?.revision,
                 providers: providers.isEmpty ? knownProviders : domainProviders,
-                accountKeys: accountID.map { Set([$0]) } ?? importedAccounts,
+                accountKeys: retryScope,
                 reason: Self.refreshFailureReason(error),
                 hostFailure: providers.isEmpty,
                 occurredAt: Date()
@@ -982,11 +983,24 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
 
 private struct QuotaFailure {
     let revision: UInt64?
-    let providers: Set<QuotaProvider>
-    let accountKeys: Set<String>?
+    var providers: Set<QuotaProvider>
+    var accountKeys: Set<String>?
     let reason: QuotaRefreshFailureReason
     let hostFailure: Bool
     let occurredAt: Date
+
+    /// What remains once a new refresh of `providers`, limited to `accountKeys` when set, retries part of it.
+    func retiring(_ providers: Set<QuotaProvider>, accountKeys retried: Set<String>?) -> Self? {
+        guard !self.providers.isDisjoint(with: providers) else { return self }
+        var rest = self
+        if let retried {
+            guard let keys = accountKeys else { return self }
+            rest.accountKeys = keys.subtracting(retried)
+            return rest.accountKeys?.isEmpty == true ? nil : rest
+        }
+        rest.providers.subtract(providers)
+        return rest.providers.isEmpty ? nil : rest
+    }
 }
 
 private extension JSONEncoder {
