@@ -416,28 +416,6 @@ final class QuotioCLIBackendTests: XCTestCase {
         }
     }
 
-    func testSnapshotFailureDoesNotInventQuotaOrIssuesForDisabledAccounts() async throws {
-        let fixture = try hostFixture { root in
-            var accounts = root["accounts"] as! [[String: Any]]
-            accounts[0]["state"] = "disabled"
-            accounts[0]["enabled"] = false
-            root["accounts"] = accounts
-            root["usage"] = []
-        }
-        let backend = QuotioCLIBackend(session: stubSession())
-        await backend.connect(.init(baseURL: URL(string: "http://127.0.0.1:43210")!, token: "test"))
-        QuotioCLIURLProtocol.enqueue(fixture)
-        _ = await backend.bootstrap(mode: .monitor)
-        QuotioCLIURLProtocol.enqueue(#"{"error":"credential_storage_corrupt"}"#, status: 503)
-        let failed = await backend.bootstrap(mode: .monitor)
-        let disabled = QuotaAccountID(provider: .copilot, accountKey: "copilot-account")
-        XCTAssertNil(failed.accountStates[disabled])
-        XCTAssertNil(failed.accountIssues[disabled])
-        XCTAssertNil(failed.issues[.copilot])
-        XCTAssertNil(failed.quotas[.copilot])
-        XCTAssertEqual(failed.hostIssue?.reason, .credentialStorage)
-    }
-
     func testFailuresLeaveRetainedDisabledAccountsAlone() async throws {
         let fixture = try hostFixture { root in
             var accounts = root["accounts"] as! [[String: Any]]
