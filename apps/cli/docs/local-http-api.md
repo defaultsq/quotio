@@ -262,6 +262,20 @@ Validate the version, owned child PID and loopback address, then authenticate
 `/v2/status`. The record means the listener is bound, not that quota has loaded.
 Keep stdin open: EOF, read failure or unexpected extra input ends the session.
 
+In parent-pipe mode, stderr carries LF-delimited JSON diagnostics for vault
+Keychain failures instead of general tracing output:
+
+```json
+{"diagnostic_version":1,"event":"vault_keychain_read_failed","os_status":-25308}
+```
+
+The event is limited to `vault_keychain_read_failed`, `vault_keychain_write_failed`
+or `vault_keychain_authorize_failed`; `os_status` is a signed 32-bit OSStatus.
+Parents must drain stderr, bound records, ignore unsupported versions/events and
+log only the validated event and numeric status, never a raw line. Diagnostics
+contain no credential values. HTTP storage error codes remain authoritative for
+user-facing recovery; an OSStatus record does not grant authorization.
+
 ## iPhone companion
 
 The local owner can `GET /v2/sharing` to discover active private IPv4 addresses.
