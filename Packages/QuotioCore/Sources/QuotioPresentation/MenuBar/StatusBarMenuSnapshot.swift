@@ -55,6 +55,10 @@ struct StatusBarMenuAccountSnapshot: Equatable, Sendable {
     let warning: StatusBarMenuQuotaWarning?
     let isRefreshing: Bool
     let isRefreshBlocked: Bool
+
+    @MainActor var hasDetail: Bool {
+        warning != nil || quota.map { !$0.isForbidden && $0.models.contains { !$0.isStandaloneMetric } } == true
+    }
 }
 
 struct StatusBarMenuProviderSnapshot: Equatable, Sendable {
@@ -103,23 +107,28 @@ public struct StatusBarMenuSnapshot: Equatable, Sendable {
 
     /// What `StatusBarMenuRenderer.buildMenu` turns into items; anything else updates in place.
     struct Layout: Equatable {
+        struct Card: Equatable {
+            let id: QuotaAccountID
+            let hasQuota: Bool
+            let hasDetail: Bool
+        }
         struct Section: Equatable {
             let provider: QuotaProvider
-            let accounts: [QuotaAccountID]
-            let accountsWithQuota: Set<QuotaAccountID>
+            let cards: [Card]
             let hasWarning: Bool
         }
         let sections: [Section]
         let quotaDisplayStyle: QuotaDisplayStyle
     }
 
-    var layout: Layout {
+    @MainActor var layout: Layout {
         Layout(
             sections: providers.map { provider in
                 Layout.Section(
                     provider: provider.provider,
-                    accounts: provider.accounts.map(\.id),
-                    accountsWithQuota: Set(provider.accounts.filter { $0.quota != nil }.map(\.id)),
+                    cards: provider.accounts.map {
+                        Layout.Card(id: $0.id, hasQuota: $0.quota != nil, hasDetail: $0.hasDetail)
+                    },
                     hasWarning: provider.warning != nil
                 )
             },
