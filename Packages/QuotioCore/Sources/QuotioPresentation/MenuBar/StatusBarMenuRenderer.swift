@@ -343,9 +343,7 @@ final class StatusBarMenuRenderer {
     /// Charts every limit beside the menu instead of inside it, so the menu
     /// stays short on small screens.
     private func buildAccountDetailSubmenu(_ account: StatusBarMenuAccountSnapshot) -> NSMenu? {
-        guard account.warning != nil || account.quota.map({ !$0.isForbidden && $0.models.contains(where: { !$0.isStandaloneMetric }) }) == true else {
-            return nil
-        }
+        guard account.hasDetail else { return nil }
         let submenu = makeMenu()
         submenu.addItem(viewItem(for: MenuContent {
             let current = self.snapshot.providers.first { $0.provider == account.id.provider }?
