@@ -100,6 +100,32 @@ public struct StatusBarMenuSnapshot: Equatable, Sendable {
     let refreshSchedule: StatusBarRefreshSchedule?
     let displaySettings: StatusBarMenuDisplaySettings
     let language: AppLanguage
+
+    /// What `StatusBarMenuRenderer.buildMenu` turns into items; anything else updates in place.
+    struct Layout: Equatable {
+        struct Section: Equatable {
+            let provider: QuotaProvider
+            let accounts: [QuotaAccountID]
+            let accountsWithQuota: Set<QuotaAccountID>
+            let hasWarning: Bool
+        }
+        let sections: [Section]
+        let quotaDisplayStyle: QuotaDisplayStyle
+    }
+
+    var layout: Layout {
+        Layout(
+            sections: providers.map { provider in
+                Layout.Section(
+                    provider: provider.provider,
+                    accounts: provider.accounts.map(\.id),
+                    accountsWithQuota: Set(provider.accounts.filter { $0.quota != nil }.map(\.id)),
+                    hasWarning: provider.warning != nil
+                )
+            },
+            quotaDisplayStyle: displaySettings.quotaDisplayStyle
+        )
+    }
 }
 
 public enum StatusBarMenuSnapshotMapper {
@@ -171,13 +197,9 @@ public enum StatusBarMenuSnapshotMapper {
                 if $0.email == $1.email { return $0.id.accountKey < $1.id.accountKey }
                 return $0.email.localizedStandardCompare($1.email) == .orderedAscending
             }
-            let warning: StatusBarMenuQuotaWarning?
-            if accounts.isEmpty {
-                warning = quota.issues[provider].map {
-                    StatusBarMenuQuotaWarning(state: .failed($0.reason), issue: $0, lastSuccessfulUpdate: nil)
-                }
-            } else {
-                warning = nil
+            let warning = quota.issues[provider].flatMap { issue in
+                accounts.contains { $0.warning?.issue == issue } ? nil
+                    : StatusBarMenuQuotaWarning(state: .failed(issue.reason), issue: issue, lastSuccessfulUpdate: nil)
             }
             return StatusBarMenuProviderSnapshot(
                 displayName: displayName(provider),

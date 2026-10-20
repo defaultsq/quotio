@@ -216,6 +216,11 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         force: Bool = false
     ) async -> QuotaSnapshot {
         selectMode(mode)
+        // After a failed first read the refresh capability is unknown, so retry the read instead.
+        guard hostSnapshot != nil || snapshot.hostIssue == nil else {
+            await loadSnapshot(mode: mode)
+            return snapshot
+        }
         let selected = providers?.map(\.rawValue) ?? []
         await performRefresh(providers: selected, accountID: nil, mode: mode, force: force)
         return snapshot
@@ -753,6 +758,7 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         } catch {
             guard activeMode == mode, connectionID == requestConnection, snapshotRequestID == requestID else { return }
             if let problem = Self.storageProblem(error) { storageProblem = problem }
+            if hostSnapshot == nil { snapshot.canRefresh = true }
             markFailure(
                 for: knownProviders.union(refreshedProviders ?? []),
                 reason: Self.refreshFailureReason(error),

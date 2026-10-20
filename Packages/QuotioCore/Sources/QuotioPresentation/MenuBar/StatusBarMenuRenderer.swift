@@ -141,7 +141,7 @@ private final class StatusBarMenuHostingView<Content: View>: NSHostingView<Conte
 final class StatusBarMenuRenderer {
     private var snapshot: StatusBarMenuSnapshot
     @ObservationIgnored private weak var refreshItem: NSMenuItem?
-    @ObservationIgnored private weak var emptyStateItem: NSMenuItem?
+    @ObservationIgnored private weak var hostStatusItem: NSMenuItem?
     @ObservationIgnored private var recoveryItems: [(item: StatusBarCommandMenuItem, separator: NSMenuItem, accountID: QuotaAccountID)] = []
     private let commands: StatusBarCommandDispatcher
     private let providerFilterController: StatusBarProviderFilterController
@@ -203,35 +203,17 @@ final class StatusBarMenuRenderer {
                 providerFilterController.register(headerItem, scope: .allProvidersOnly)
                 menu.addItem(headerItem)
 
+                if providerSnapshot.warning != nil {
+                    let warningItem = buildProviderWarningItem(providerSnapshot)
+                    providerFilterController.register(warningItem, scope: .provider(providerSnapshot.provider))
+                    menu.addItem(warningItem)
+                }
                 if providerSnapshot.accounts.isEmpty {
-                    let emptyItem: NSMenuItem
-                    if providerSnapshot.warning != nil {
-                        emptyItem = viewItem(for: MenuContent {
-                            let current = self.snapshot.providers.first { $0.provider == providerSnapshot.provider }
-                            return Group {
-                                if let current, let warning = current.warning {
-                                    MenuQuotaWarningView(
-                                        warning: warning,
-                                        canRetry: current.supportsScopedRefresh && !current.isRefreshing,
-                                        onRecover: {
-                                            self.recover(warning: warning, provider: current.provider)
-                                        }
-                                    )
-                                }
-                            }
-                            .padding(.horizontal, MenuItemMetrics.contentInset)
-                            .padding(.vertical, 8)
-                        }, title: providerSnapshot.displayName)
-                        emptyItem.representedObject = providerSnapshot.provider.rawValue
-                        emptyItem.identifier = NSUserInterfaceItemIdentifier("quotaProviderIssue")
-                    } else {
-                        emptyItem = buildEmptyStateItem()
+                    if providerSnapshot.warning == nil {
+                        let emptyItem = buildEmptyStateItem()
+                        providerFilterController.register(emptyItem, scope: .provider(providerSnapshot.provider))
+                        menu.addItem(emptyItem)
                     }
-                    providerFilterController.register(
-                        emptyItem,
-                        scope: .provider(providerSnapshot.provider)
-                    )
-                    menu.addItem(emptyItem)
                 } else {
                     for (accountIndex, account) in providerSnapshot.accounts.enumerated() {
                         if accountIndex > 0 && snapshot.displaySettings.quotaDisplayStyle != .compact {
@@ -261,7 +243,7 @@ final class StatusBarMenuRenderer {
 
             menu.addItem(NSMenuItem.separator())
         } else {
-            menu.addItem(buildEmptyStateItem())
+            menu.addItem(buildHostStatusItem())
             menu.addItem(NSMenuItem.separator())
         }
         
@@ -283,10 +265,12 @@ final class StatusBarMenuRenderer {
         highlightController.highlight(item)
     }
 
+    var layout: StatusBarMenuSnapshot.Layout { snapshot.layout }
+
     func update(snapshot: StatusBarMenuSnapshot) {
         self.snapshot = snapshot
         refreshItem?.isEnabled = snapshot.canRefresh && !snapshot.isLoadingQuotas
-        emptyStateItem?.identifier = hostIssueIdentifier
+        hostStatusItem?.identifier = hostIssueIdentifier
         for recovery in recoveryItems {
             let account = snapshot.providers.first { $0.provider == recovery.accountID.provider }?
                 .accounts.first { $0.id == recovery.accountID }
@@ -424,6 +408,10 @@ final class StatusBarMenuRenderer {
     // MARK: - Empty State
     
     private func buildEmptyStateItem() -> NSMenuItem {
+        viewItem(for: MenuEmptyStateView(), title: "menubar.noData".localized())
+    }
+
+    private func buildHostStatusItem() -> NSMenuItem {
         let item = viewItem(for: MenuContent {
             Group {
                 if let warning = self.snapshot.hostWarning {
@@ -440,7 +428,29 @@ final class StatusBarMenuRenderer {
             }
         }, title: "menubar.noData".localized())
         item.identifier = hostIssueIdentifier
-        emptyStateItem = item
+        hostStatusItem = item
+        return item
+    }
+
+    private func buildProviderWarningItem(_ providerSnapshot: StatusBarMenuProviderSnapshot) -> NSMenuItem {
+        let item = viewItem(for: MenuContent {
+            let current = self.snapshot.providers.first { $0.provider == providerSnapshot.provider }
+            return Group {
+                if let current, let warning = current.warning {
+                    MenuQuotaWarningView(
+                        warning: warning,
+                        canRetry: current.supportsScopedRefresh && !current.isRefreshing,
+                        onRecover: {
+                            self.recover(warning: warning, provider: current.provider)
+                        }
+                    )
+                }
+            }
+            .padding(.horizontal, MenuItemMetrics.contentInset)
+            .padding(.vertical, 8)
+        }, title: providerSnapshot.displayName)
+        item.representedObject = providerSnapshot.provider.rawValue
+        item.identifier = NSUserInterfaceItemIdentifier("quotaProviderIssue")
         return item
     }
 
