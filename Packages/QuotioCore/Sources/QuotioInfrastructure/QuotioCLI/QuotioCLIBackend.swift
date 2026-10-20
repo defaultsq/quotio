@@ -47,6 +47,8 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
     private var client: QuotioHostHTTPClient?
     private var reportedAccounts: [Account] = []
     private var hostSnapshot: QuotioHostSnapshot?
+    /// Refresh failures the host snapshot does not report, kept until the host publishes a newer revision.
+    private var refreshFailures: [QuotaFailure] = []
     private var connectionID = UUID()
     private var snapshotRequestID = UUID()
     private var activeMode: QuotaOperatingMode = .monitor
@@ -153,6 +155,7 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         cancelHistoryRequests()
         connectionID = UUID()
         hostSnapshot = nil
+        refreshFailures = []
         discoveryState = nil
         storageProblem = nil
         reportedAccounts = []
@@ -676,6 +679,7 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
             : Set(providers.compactMap(QuotaProvider.init(rawValue:)))
         guard domainProviders.isDisjoint(with: snapshot.refreshingProviders) else { return }
         let requestConnection = connectionID
+        refreshFailures.removeAll { !$0.providers.isDisjoint(with: domainProviders) }
         snapshot.refreshingProviders.formUnion(domainProviders)
         publish()
         defer {
@@ -711,13 +715,16 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         } catch {
             guard activeMode == mode, connectionID == requestConnection else { return }
             if let problem = Self.storageProblem(error) { storageProblem = problem }
-            let accountKeys = accountID.map { Set([$0]) } ?? importedAccounts
-            markFailure(
-                for: providers.isEmpty ? knownProviders : domainProviders,
-                accountKeys: accountKeys,
+            let failure = QuotaFailure(
+                revision: hostSnapshot?.revision,
+                providers: providers.isEmpty ? knownProviders : domainProviders,
+                accountKeys: accountID.map { Set([$0]) } ?? importedAccounts,
                 reason: Self.refreshFailureReason(error),
-                hostFailure: providers.isEmpty
+                hostFailure: providers.isEmpty,
+                occurredAt: Date()
             )
+            refreshFailures.append(failure)
+            if apply(failure) { publish() }
             await logger?.write(.warning, message: "Quota refresh failed=\(Self.failureCategory(error))")
         }
     }
@@ -748,10 +755,13 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
             next.refreshingProviders = refreshing.subtracting(refreshedProviders ?? [])
             next.providerNames = snapshot.providerNames
             let accounts = frame.accounts.compactMap(Self.resolvedAccount)
-            let changed = snapshot != next || reportedAccounts != accounts
+            let previous = snapshot
             snapshot = next
             hostSnapshot = frame
             snapshot.historyAvailability = historyAvailability()
+            refreshFailures.removeAll { $0.revision != frame.revision }
+            for failure in refreshFailures { apply(failure) }
+            let changed = snapshot != previous || reportedAccounts != accounts
             reportedAccounts = accounts
             storageProblem = nil
             if changed { publish() }
@@ -850,9 +860,20 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         reason: QuotaRefreshFailureReason = .unavailable,
         hostFailure: Bool = false
     ) {
+        let failure = QuotaFailure(
+            revision: nil, providers: providers, accountKeys: accountKeys,
+            reason: reason, hostFailure: hostFailure, occurredAt: Date()
+        )
+        if apply(failure) { publish() }
+    }
+
+    @discardableResult
+    private func apply(_ failure: QuotaFailure) -> Bool {
+        let (providers, accountKeys, reason, hostFailure, now) = (
+            failure.providers, failure.accountKeys, failure.reason, failure.hostFailure, failure.occurredAt
+        )
         var changed = !snapshot.refreshingProviders.isDisjoint(with: providers)
         snapshot.refreshingProviders.subtract(providers)
-        let now = Date()
         if hostFailure, snapshot.hostIssue?.kind != .failed || snapshot.hostIssue?.reason != reason {
             snapshot.hostIssue = QuotaRefreshIssue(kind: .failed, occurredAt: now, reason: reason)
             changed = true
@@ -881,7 +902,7 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
                 changed = true
             }
         }
-        if changed { publish() }
+        return changed
     }
 
     private func publish() {
@@ -957,6 +978,15 @@ public actor QuotioCLIBackend: AccountManaging, QuotaCoordinating, MonitoringSet
         Set(snapshot.issues.keys).union(knownAccounts.map(\.provider))
     }
 
+}
+
+private struct QuotaFailure {
+    let revision: UInt64?
+    let providers: Set<QuotaProvider>
+    let accountKeys: Set<String>?
+    let reason: QuotaRefreshFailureReason
+    let hostFailure: Bool
+    let occurredAt: Date
 }
 
 private extension JSONEncoder {
