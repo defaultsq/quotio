@@ -17,11 +17,7 @@ use tracing_subscriber::{filter::Targets, layer::SubscriberExt, util::Subscriber
 struct NativeVaultDiagnostics;
 
 impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for NativeVaultDiagnostics {
-    fn on_event(
-        &self,
-        event: &tracing::Event<'_>,
-        _: tracing_subscriber::layer::Context<'_, S>,
-    ) {
+    fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
         if event.metadata().target() != "quotio::accounts::vault" {
             return;
         }
@@ -226,7 +222,9 @@ async fn run() -> ExitCode {
             if args.parent_pipe {
                 tracing_subscriber::registry()
                     .with(NativeVaultDiagnostics)
-                    .with(Targets::new().with_target("quotio::accounts::vault", tracing::Level::WARN))
+                    .with(
+                        Targets::new().with_target("quotio::accounts::vault", tracing::Level::WARN),
+                    )
                     .init();
             } else {
                 tracing_subscriber::registry()
