@@ -276,6 +276,36 @@ final class QuotioCLIBackendTests: XCTestCase {
         await backend.cancelForTermination()
     }
 
+    func testRefreshAllWithoutAccountsTracksCatalogProvidersAndFailsAtHostLevel() async throws {
+        let backend = QuotioCLIBackend(session: stubSession())
+        await backend.connect(.init(baseURL: URL(string: "http://127.0.0.1:43210")!, token: "test"))
+        QuotioCLIURLProtocol.enqueue(try hostFixture { $0["accounts"] = []; $0["usage"] = [] })
+        _ = await backend.bootstrap(mode: .monitor)
+        let providers = ["copilot", "codex"].map { id in
+            ["id": id, "display_name": id, "actions": [], "capabilities": ["operations": [], "settings": []]] as [String: Any]
+        }
+        let data = try JSONSerialization.data(withJSONObject: ["schema_version": 2, "providers": providers])
+        QuotioCLIURLProtocol.enqueue(String(decoding: data, as: UTF8.self))
+        _ = try await backend.monitoringProviders()
+        var states = await backend.states().makeAsyncIterator()
+        _ = await states.next()
+        QuotioCLIURLProtocol.enqueue(#"{"id":"refresh","status":"running"}"#)
+        QuotioCLIURLProtocol.enqueue(#"{"id":"refresh","status":"failed"}"#)
+        QuotioCLIURLProtocol.enqueue(#"{"id":"refresh","status":"failed"}"#)
+
+        let refresh = Task { await backend.refreshAll(mode: .monitor, force: true) }
+        let loading = await states.next()
+        XCTAssertEqual(loading?.refreshingProviders, [.copilot, .codex])
+        _ = await backend.refreshAll(mode: .monitor, force: true)
+        let failed = await refresh.value
+
+        XCTAssertEqual(QuotioCLIURLProtocol.bodies(forPath: "/v2/refresh").count, 1)
+        XCTAssertTrue(failed.refreshingProviders.isEmpty)
+        XCTAssertEqual(failed.hostIssue?.kind, .failed)
+        XCTAssertTrue(failed.issues.isEmpty)
+        await backend.cancelForTermination()
+    }
+
     func testSnapshotFailureWithoutKnownAccountsUsesHostIssueInsteadOfCatalogProviderIssues() async throws {
         for cachedCatalog in [false, true] {
             let backend = QuotioCLIBackend(session: stubSession())
@@ -408,6 +438,42 @@ final class QuotioCLIBackendTests: XCTestCase {
         XCTAssertEqual(failed.hostIssue?.reason, .credentialStorage)
     }
 
+    func testFailuresLeaveRetainedDisabledAccountsAlone() async throws {
+        let fixture = try hostFixture { root in
+            var accounts = root["accounts"] as! [[String: Any]]
+            accounts[0]["state"] = "disabled"
+            accounts[0]["enabled"] = false
+            accounts[0]["sources"] = (accounts[0]["sources"] as! [[String: Any]]).map { source in
+                var source = source
+                source["selected"] = false
+                return source
+            }
+            root["accounts"] = accounts
+        }
+        let disabled = QuotaAccountID(provider: .copilot, accountKey: "copilot-account")
+        for disconnects in [false, true] {
+            let backend = QuotioCLIBackend(session: stubSession())
+            await backend.connect(.init(baseURL: URL(string: "http://127.0.0.1:43210")!, token: "test"))
+            QuotioCLIURLProtocol.enqueue(fixture)
+            let initial = await backend.bootstrap(mode: .monitor)
+            let retained = try XCTUnwrap(initial.accountStates[disabled])
+            XCTAssertEqual(retained.connection, .disabled)
+
+            if disconnects {
+                await backend.disconnect()
+            } else {
+                QuotioCLIURLProtocol.enqueue(#"{"error":"credential_storage_corrupt"}"#, status: 503)
+                _ = await backend.bootstrap(mode: .monitor)
+            }
+            let failed = await backend.snapshot
+
+            XCTAssertEqual(failed.accountStates[disabled], retained)
+            XCTAssertNil(failed.accountIssues[disabled])
+            XCTAssertNil(failed.issues[.copilot])
+            XCTAssertEqual(failed.issues[.devin]?.kind, .failed)
+        }
+    }
+
     func testScopedRefreshSnapshotFailureMarksEveryKnownAccount() async throws {
         let backend = QuotioCLIBackend(session: stubSession())
         await backend.connect(.init(baseURL: URL(string: "http://127.0.0.1:43210")!, token: "test"))
@@ -490,8 +556,14 @@ final class QuotioCLIBackendTests: XCTestCase {
             var usage = root["usage"] as! [[String: Any]]
             usage.removeFirst()
             root["usage"] = usage
+            var host = root["host"] as! [String: Any]
+            var capabilities = host["capabilities"] as! [String: Any]
+            capabilities["refresh"] = ["available": true, "reason": NSNull()]
+            host["capabilities"] = capabilities
+            root["host"] = host
         })
         let initial = await backend.bootstrap(mode: .monitor)
+        XCTAssertTrue(initial.canRefresh)
 
         await backend.disconnect()
         let failed = await backend.snapshot
@@ -506,6 +578,7 @@ final class QuotioCLIBackendTests: XCTestCase {
         XCTAssertEqual(failed.accountStates[missing]?.connection, .reauthenticationRequired)
         XCTAssertEqual(failed.accountIssues[retained]?.reason, .unavailable)
         XCTAssertEqual(failed.accountIssues[missing]?.reason, .unavailable)
+        XCTAssertFalse(failed.canRefresh)
         XCTAssertFalse(failed.historyAvailability.connected)
     }
 
